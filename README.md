@@ -1,48 +1,56 @@
 
-# Introduction to DNA-Seq processing for cancer data - SNVs
-***By Mathieu Bourgey, Ph.D***  
-*https://bitbucket.org/mugqic/mugqic_pipelines*
+# Introduction to variant discovery and annotations in cancer data
+***By Robert Eveleigh, MSc., Alan Pacis, PhD.***  
+*https://github.com/c3g/GenPipes*
 
 ================================
 
 This work is licensed under a [Creative Commons Attribution-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-sa/3.0/deed.en_US). This means that you are able to copy, share and modify the work, as long as the result is distributed under the same license.
 
 ================================
+Welcome to this introductory tutorial on variant discovery and annotation, where you'll work through the process of identifying and interpreting genomic variants using real cancer sequencing data. 
 
-In this workshop, we will present the main steps that are commonly used to process and to analyze cancer sequencing data. We will focus only on whole genome data and provide command lines that allow detecting Single Nucleotide Variants (SNV). This workshop will show you how to launch individual steps of a complete DNA-Seq SNV pipeline using cancer data
-
+In this workshop, we will focus only on whole genome data and provide command lines that allow detecting Single Nucleotide Variants (SNV). 
+This workshop will show you how to launch individual steps of a complete DNA-Seq SNV pipeline using cancer data
 
 ## Data Source
-We will be working on a CageKid sample pair, patient C0098.
-The CageKid project is part of ICGC and is focused on renal cancer in many of it's forms.
-The raw data can be found on EGA and calls, RNA and DNA, can be found on the ICGC portal. 
-For more details about [CageKid](http://www.cng.fr/cagekid/)
+Throughout this lab, we'll be using HCC1395, a triple-negative breast cancer cell line derived from a primary ductal carcinoma, paired with its matched normal lymphoblastoid line, HCC1395BL, derived from the same patient. 
+This tumor-normal pair isn't just a convenient teaching example — it's the reference standard adopted by the SEQC2 (Sequencing Quality Control Phase 2) consortium precisely because its somatic mutations and germline variants have been exhaustively validated across multiple sequencing platforms and bioinformatics pipelines, giving us a high-confidence "truth set" to check our own results against as we learn. 
+Biologically, HCC1395 is a useful sample for this kind of exercise because it carries a well-characterized germline BRCA1 loss-of-function mutation alongside a somatically acquired TP53 mutation, plus additional alterations in genes like PTEN, CDKN2A, and BRCA2 — giving you a realistic mix of germline and somatic variant types, and a chance to see firsthand how variant calling, filtering, and functional annotation come together to distinguish an inherited cancer-predisposition variant from a tumor-acquired driver mutation. 
 
-For practical reasons we subsampled the reads from the sample because running the whole dataset would take way too much time and resources.
+The HCC1395 sample pair was downloaded from public SRA archive HCC1395 tumor (SRR7890943) and HCC1395BL normal (SRR7890893).
+Both normal and tumor were sequenced on Illumina NovaSeq 6000 using DNA from fresh cells with TruSeq PCR free library sequenced to ~70x coverage for the tumor and ~60x coverage for the normal.
 
+By the end of this tutorial, you'll have taken processed sequencing data from this well-studied sample through the core steps of a variant discovery workflow — variant calling, and annotation — and interpreted the biological significance of what you find.
+To do this, we will use a subset of the HCC1395/HCC1395BL dataset, focusing on a specific regions of chromosome 13 and 17 that containing 2 somatic (BRCA2 and TP53) and 1 germline (BRCA1).
+Using four variant callers (VarScan2, VarDict, MuTecT2 and Strelka2) we will generate a unified callset of somatic/germlie variants and annotate them using the CPSR/PCGR reporting system.
+
+
+**For more details about** [HCC1395](http://www.cng.fr/cagekid/)
+
+For practical reasons we subsampled the reads for variants of interests (refseq gene boundaries for BRCA1, BRCA2, and TP53 with 2kb padding) in the table below because running the whole dataset would take way too much time and resources. 
+See data/regions.bed for the exact coordinates of the regions we will be using in this practical.
 
 
 ### Environment setup
 ```{.bash}
-
+#Spin up docker container
 docker run --privileged -v /tmp:/tmp --network host -it \
     -w $PWD -v $HOME:$HOME -v /etc/fonts/:/etc/fonts/ \
-    -v $HOME/cvmfs_caches/:/cvmfs-cache/ c3genomics/genpipes:v2.1.0
+    -v $HOME/cvmfs_caches/:/cvmfs-cache/ c3genomics/genpipes:v6.2.0
 
-    
+#Load modules and reference resources    
 module purge
 
-export REF=$MUGQIC_INSTALL_HOME/genomes/species/Homo_sapiens.GRCh38/
-export COURSE=/home/training/ebicancerworkshop2022
+export REF=${MUGQIC_INSTALL_HOME}/genomes/species/Homo_sapiens.GRCh38/
+export COURSE=/home/training/cbw_workshop_2026
 
+#create and move to working directory
 mkdir -p $COURSE/SNV
 
 cd $COURSE/SNV
 
-
-
 ```
-
 
 ### Software requirements
 These are all already installed, but here are the original links.
@@ -58,685 +66,99 @@ These are all already installed, but here are the original links.
   * [vardict](https://github.com/AstraZeneca-NGS/VarDictJava)
   * [bcbio variation](https://github.com/chapmanb/bcbio.variation)
 
-
-We should load the corresponding modules 
-
-```{.bash}
-module load mugqic/java/openjdk-jdk1.8.0_72 \
-   mugqic/bvatools/1.6 \
-   mugqic/trimmomatic/0.36 \
-   mugqic/samtools/1.9 \
-   mugqic/bwa/0.7.17 \
-   mugqic/GenomeAnalysisTK/4.1.2.0 \
-   mugqic/R_Bioconductor/3.5.0_3.7 \
-   mugqic/VarScan/2.4.3 \
-   mugqic/vcftools/0.1.14 \
-   mugqic/bcftools/1.9 \
-   mugqic/VarDictJava/1.4.9 \
-   mugqic/perl/5.22.1 \
-   mugqic/bcbio.variation.recall/0.1.7 \
-   mugqic/snpEff/4.3 \
-   mugqic/igvtools/2.3.67
-
-```
-
-
 ## Original Setup
 
 The initial structure of your folders should look like this:
 ```
 <ROOT>
-|-- raw_reads/               # fastqs from the center (down sampled)
-    `-- normal               # The blood sample directory
-        `-- run*_?           # Lane directory by run number. Contains the fastqs
-    `-- tumor                # The tumor sample directory
-        `-- run*_?           # Lane directory by run number. Contains the fastqs
+|-- alignments/              # aligments from the center (down sampled)
+    `-- HCC1395BL_normal     # The blood sample directory
+        `-- HCC1395BL*_?     # Lane directory by run number. Contains the fastqs
+    `-- HCC1395_tumor        # The tumor sample directory
+        `-- HCC1395*_?       # Lane directory by run number. Contains the fastqs
 |-- savedResults             # Folder containing precomputed results
 |-- scripts                  # cheat sheet folder
-|-- adapters.fa              # fasta file containing the adapter used for sequencing
 ```
-
 
 
 ### Cheat file
-* You can find all the unix command lines of this practical in the file: [commands.sh](scripts/commands.sh)
+**You can find all the unix command lines for this practical in the file.** [commands.sh](scripts/commands.sh)
 
 
-
-# First data glance
-So you've just received an email saying that your data is ready for download from the sequencing center of your choice.
+# Getting started
+So you've just received an email from the sequencing center indicating that your data is ready for download.
 
 **What should you do ?** [solution](solutions/_data.md)
 
+You have now processed your data using best practices and should have one BAM for normal and tumor.
 
-### Fastq files
-Let's first explore the fastq file.
-
-Try these commands
+Let's inspect the BAM files to see what is in there.
 
 ```{.bash}
-zless -S raw_reads/normal/run62DVGAAXX_1/normal.64.pair1.fastq.gz
+ls -l alignment/HCC1395BL_normal/
+samtools view -H alignment/HCC1395BL_normal/HCC1395BL_normal.subset.bam
 
 ```
-
-**Why was it like that ?** [solution](solutions/_fastq1.md)
-
-
-Now try these commands:
+**How was this data processed?** [solution](solutions/_view1.md)
 
 ```{.bash}
-zcat raw_reads/normal/run62DVGAAXX_1/normal.64.pair1.fastq.gz | head -n4
-zcat raw_reads/normal/run62DVGAAXX_1/normal.64.pair2.fastq.gz | head -n4
+samtools view -H alignment/HCC1395BL_normal/HCC1395BL_normal.subset.bam | grep "@RG"
 
 ```
 
-**What was special about the output ? Why was it like that?** [Solution](solutions/_fastq2.md)
+You should have your 1 read group entry.
 
-You could also just count the reads
+**Why did we use the -H switch?** [Solution](solutions/_view2.md)
 
-```{.bash}
-zgrep -c "^@HWUSI" raw_reads/normal/run62DVGAAXX_1/normal.64.pair1.fastq.gz
+**Try without. What happens?** [Solution](solutions/_view3.md)
 
-```
+# Variant Discovery in Cancer
 
-We should obtain 4003 reads
+![tumor-normal variant discovery](img/tumor_normal_vs_tumor_only_calling.svg)
 
-**Why shouldn't you just do ?** 
+Tumor-normal (paired): the gold standard because the normal acts as a per-patient control for both germline variation and technical artifacts.
 
-```{.bash}
-zgrep -c "^@" raw_reads/normal/run62DVGAAXX_1/normal.64.pair1.fastq.gz
+Tumor-only: with no matched normal, callers substitute population databases (gnomAD, dbSNP, ExAC, etc.) and/or a panel of normals (PoN) to guess which variants are likely germline (common in the population) versus somatic
+This is inherently weaker e.g. private/rare germline variants can get miscalled as somatic
+PON can be useful to filter out recurrent technical artifacts, especially when using the same sequencing platform and library prep (WGS and WES - same baits) as the PoN samples, but it won't help with private germline variants.
 
-```
+Before we start variant discovery, let's look at the structure of the VCF file. 
 
-[Solution](solutions/_fastq3.md)
+![VCF-spec_graphic](img/vcf_format_example.png)
 
+Briefly, the VCF format is is flexible and extensible, allowing for the inclusion of various types of information about each variant in a text file format (most likely stored in a compressed manner) that contains:
+- A header denoted with ## or # containing meta-data information 
+- A body containing information about a position in the genome. The VCF format is flexible and extensible, allowing for the inclusion of various types of information about each variant.
 
-### Quality
-We can't look at all the reads. Especially when working with whole genome 50x data. You could easily have Billions of reads.
+Notes:
+1. ##INFO=: describes the INFO field, which contains additional information about the variant, typicaly with caller-specifics, annotations etc.
+2. ##FORMAT=: describes the FORMAT field, which contains information about the genotype of each sample at that position. One set of FORMAT fields is provided for each SAMPLE in the VCF file.
+3. #CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO, FORMAT: these are the standard columns in the VCF file. The first 8 columns are fixed and contain information about the variant itself. The last two columns contain information about the genotype of each sample at that position.
+4. The first and second variant in the example contain multi-allelic variants, which are represented in the ALT field as a comma-separated list of alternate alleles.  More on this in the following section on multi-allelic variants.
 
-Tools like FastQC and BVATools readsqc can be used to plot many metrics from these data sets.
+Now that we have a basic understanding of the VCF format, let's look at the different variant callers we will be using in this practical.
 
-Let's look at the data:
+Until recently, the main difference between the different callers is the way they handle the data and the statistical model they use to call variants.
+Most of SNV and indel callers use either Baysian, threshold or t-test approach for variant discovery. 
+However, more variant discovery tools are making use of machine learning (ML), for discovery (e.g. DeepSomatic, Clair3), variant filtering, prioritization or annotations.
 
-```{.bash}
-# Generate original QC
-mkdir -p originalQC/
-java -Xmx1G -jar ${BVATOOLS_JAR} readsqc --quality 64 \
-  --read1 raw_reads/normal/run62DVGAAXX_1/normal.64.pair1.fastq.gz \
-  --read2 raw_reads/normal/run62DVGAAXX_1/normal.64.pair2.fastq.gz \
-  --threads 2 --regionName normalrun62DVGAAXX_1 --output originalQC/
+In this practical we will be focusing on well known non-ML variant callers.
+Here we will try four variant callers.
 
-```
+## Variant Callers Comparison (High-level overview more will be explained in the following sections)
 
-Open the images
-
-All the generated graphics have their uses. But 3 of them are particularly useful to get an overal picture of how good or bad a run went.
-        - The Quality box plots 
-        - The nucleotide content graphs.
-        - The Box plot shows the quality distribution of your data.
- 
-The quality of a base is computated using the Phread quality score.
-[notes](notes/_fastqQC1.md) 
-
-
-The quality of a base is computated using the Phread quality score.
-![Phred quality score formula](img/phred_formula.png)
-
-In the case of base quality the probability use represents the probability of base to have been wrongly called
-![Base Quality values](img/base_qual_value.png)
-
-The formula outputs an integer that is encoded using an ASCII table. 
-
-The way the lookup is done is by taking the the phred score adding 33 and using this number as a lookup in the table.
-
-Older illumina runs, and the data here, were using phred+64 instead of phred+33 to encode their fastq files.
-
-![ACII table](img/ascii_table.png)
-
-
-**What stands out in the graphs ?**
-[Solution](solutions/_fastqQC1.md)
-
-
-
-**Why do we see adapters ?** 
-[solution](solutions/_adapter1.md)
-
-Although nowadays this doesn't happen often, it does still happen. In some cases, miRNA, it is expected to have adapters.
-
-
-### Trimming
-Since adapter are not part of the genome they should be removed
-
-To do that we will use Trimmomatic.
- 
-The adapter file is in your work folder. 
-
-```{.bash}
-cat adapters.fa
-
-```
-
-**Why are there 2 different ones ?** [Solution](solutions/_trim1.md)
-
-
-trimming with trimmomatic:
-
-
-```{.bash}
-# Trim and convert data
-for file in raw_reads/*/run*_?/*.pair1.fastq.gz;
-do
-  FNAME=`basename $file`;
-  DIR=`dirname $file`;
-  OUTPUT_DIR=`echo $DIR | sed 's/raw_reads/reads/g'`;
-
-  mkdir -p $OUTPUT_DIR;
-  java -Xmx2G -cp $TRIMMOMATIC_JAR org.usadellab.trimmomatic.TrimmomaticPE -threads 2 -phred64 \
-    $file \
-    ${file%.pair1.fastq.gz}.pair2.fastq.gz \
-    ${OUTPUT_DIR}/${FNAME%.64.pair1.fastq.gz}.t30l50.pair1.fastq.gz \
-    ${OUTPUT_DIR}/${FNAME%.64.pair1.fastq.gz}.t30l50.single1.fastq.gz \
-    ${OUTPUT_DIR}/${FNAME%.64.pair1.fastq.gz}.t30l50.pair2.fastq.gz \
-    ${OUTPUT_DIR}/${FNAME%.64.pair1.fastq.gz}.t30l50.single2.fastq.gz \
-    TOPHRED33 ILLUMINACLIP:adapters.fa:2:30:15 TRAILING:30 MINLEN:50 \
-    2> ${OUTPUT_DIR}/${FNAME%.64.pair1.fastq.gz}.trim.out ; 
-done
-
-cat reads/normal/run62DVGAAXX_1/normal.trim.out
-
-```
-
-[note on trimmomatic command](notes/_trimmomatic.md)
-
-**What does Trimmomatic says it did ?** [Solution](solutions/_trim2.md)
-
-Exercice: 
-**Let's generate the new graphs** [Solution](solutions/_fastqQC2.md)
-
-**How does it look now ?** [Solution](solutions/_trim3.md)
-
-
-
-# Alignment
-The raw reads are now cleaned up of artefacts we can align each lane separatly.
-
-**Why should this be done separatly?** [Solution](solutions/_aln1.md)
-
-**Why is it important to set Read Group information ?** [Solution](solutions/_aln2.md)
-
-##Alignment with bwa-mem
-
-```{.bash}
-# Align data
-for file in reads/*/run*/*.pair1.fastq.gz;
-do
-  FNAME=`basename $file`;
-  DIR=`dirname $file`;
-  OUTPUT_DIR=`echo $DIR | sed 's/reads/alignment/g'`;
-  SNAME=`echo $file | sed 's/reads\/\([^/]\+\)\/.*/\1/g'`;
-  RUNID=`echo $file | sed 's/.*\/run\([^_]\+\)_.*/\1/g'`;
-  LANE=`echo $file | sed 's/.*\/run[^_]\+_\(.\).*/\1/g'`;
-
-  mkdir -p $OUTPUT_DIR;
-
-  bwa mem -M -t 5 \
-    -R "@RG\\tID:${SNAME}_${RUNID}_${LANE}\\tSM:${SNAME}\\t\
-LB:${RUNID}\\tPU:${RUNID}_${LANE}\\tCN:Centre National de Genotypage\\tPL:ILLUMINA" \
-    ${REF}/genome/bwa_index/Homo_sapiens.GRCh38.fa \
-    $file \
-    ${file%.pair1.fastq.gz}.pair2.fastq.gz \
-  | java -Xmx6G -jar ${GATK_JAR}  SortSam \
-    -I /dev/stdin \
-    -O ${OUTPUT_DIR}/${SNAME}.sorted.bam \
-    --CREATE_INDEX true --SORT_ORDER coordinate --MAX_RECORDS_IN_RAM 500000
-done
-
-```
- 
-**Why did we pipe the output of one to the other ?** [Solution](solutions/_aln3.md)
-
-**Could we have done it differently ?** [Solution](solutions/_aln4.md)
-
-
-## Lane merging
-We now have alignments for each of the sequences lanes:
- 
-   - This is not practical in it's current form. 
-   - What we wan't to do now is merge the results into one BAM.
-
-Since we identified the reads in the BAM with read groups, even after the merging, we can still identify the origin of each read.
-
-
-```{.bash}
-# Merge Data
-java -Xmx2G -jar ${GATK_JAR}  MergeSamFiles \
-  -I alignment/normal/run62DPDAAXX_8/normal.sorted.bam \
-  -I alignment/normal/run62DVGAAXX_1/normal.sorted.bam \
-  -I alignment/normal/run62MK3AAXX_5/normal.sorted.bam \
-  -I alignment/normal/runA81DF6ABXX_1/normal.sorted.bam \
-  -I alignment/normal/runA81DF6ABXX_2/normal.sorted.bam \
-  -I alignment/normal/runBC04D4ACXX_2/normal.sorted.bam \
-  -I alignment/normal/runBC04D4ACXX_3/normal.sorted.bam \
-  -I alignment/normal/runBD06UFACXX_4/normal.sorted.bam \
-  -I alignment/normal/runBD06UFACXX_5/normal.sorted.bam \
-  -O alignment/normal/normal.sorted.bam \
-  --CREATE_INDEX true
-
-java -Xmx2G -jar ${GATK_JAR}  MergeSamFiles \
-  -I alignment/tumor/run62DU0AAXX_8/tumor.sorted.bam \
-  -I alignment/tumor/run62DUUAAXX_8/tumor.sorted.bam \
-  -I alignment/tumor/run62DVMAAXX_4/tumor.sorted.bam \
-  -I alignment/tumor/run62DVMAAXX_6/tumor.sorted.bam \
-  -I alignment/tumor/run62DVMAAXX_8/tumor.sorted.bam \
-  -I alignment/tumor/run62JREAAXX_4/tumor.sorted.bam \
-  -I alignment/tumor/run62JREAAXX_6/tumor.sorted.bam \
-  -I alignment/tumor/run62JREAAXX_8/tumor.sorted.bam \
-  -I alignment/tumor/runAC0756ACXX_5/tumor.sorted.bam \
-  -I alignment/tumor/runBD08K8ACXX_1/tumor.sorted.bam \
-  -I alignment/tumor/run62DU6AAXX_8/tumor.sorted.bam \
-  -I alignment/tumor/run62DUYAAXX_7/tumor.sorted.bam \
-  -I alignment/tumor/run62DVMAAXX_5/tumor.sorted.bam \
-  -I alignment/tumor/run62DVMAAXX_7/tumor.sorted.bam \
-  -I alignment/tumor/run62JREAAXX_3/tumor.sorted.bam \
-  -I alignment/tumor/run62JREAAXX_5/tumor.sorted.bam \
-  -I alignment/tumor/run62JREAAXX_7/tumor.sorted.bam \
-  -I alignment/tumor/runAC0756ACXX_4/tumor.sorted.bam \
-  -I alignment/tumor/runAD08C1ACXX_1/tumor.sorted.bam \
-  -O alignment/tumor/tumor.sorted.bam \
-  --CREATE_INDEX true
-
-``` 
-
-You should now have one BAM containing all your data.
-
-Let's double check
-
-```{.bash}
-ls -l alignment/normal/
-samtools view -H alignment/normal/normal.sorted.bam | grep "^@RG"
-
-```
-
-You should have your 9 read group entries.
-
-**Why did we use the -H switch?** [Solution](solutions/_merge1.md)
-
-**Try without. What happens?** [Solution](solutions/_merge2.md)
-
-
-## SAM/BAM exploration
-Let's spend some time to explore bam files.
-
-```{.bash}
-samtools view alignment/normal/normal.sorted.bam | head -n4
-
-```
-
-Here you have examples of alignment results.
-A full description of the flags can be found in the SAM specification
-http://samtools.sourceforge.net/SAM1.pdf
-
-You can try using picards explain flag site to understand what is going on with your reads
-http://broadinstitute.github.io/picard/explain-flags.html
-
-The flag is the 2nd column.
-
-**What do the flags of the first 4th reads mean?** [solutions](solutions/_sambam1.md)
-
-Exercice:
-**Let's take the 3rd one, the one that is in proper pair, and find it's mate.** [solutions](solutions/_sambam3.md)
-
-**Why the pairing information is important ?**  [solutions](solutions/_sambam4.md)
-
-## SAM/BAM filtering
-
-You can use samtools to filter reads as well.
-
-Exercice:
-**How many reads mapped and unmapped were there?** [solution](solutions/_sambam2.md)
-
-
-## SAM/BAM CIGAR string
-Another useful bit of information in the SAM is the CIGAR string.
-It's the 6th column in the file. 
-
-This column explains how the alignment was achieved.
- 
-        M == base aligns *but doesn't have to be a match*. A SNP will have an M even if it disagrees with the reference.
-        I == Insertion
-        D == Deletion
-        S == soft-clips. These are handy to find un removed adapters, viral insertions, etc.
-
-An in depth explanation of the CIGAR can be found [here](http://genome.sph.umich.edu/wiki/SAM)
-
-The exact details of the cigar string can be found in the SAM spec as well.
-
-
-We won't go into too much detail at this point since we want to concentrate on cancer specific issues now.
-
-
-# Cleaning up alignments
-We started by cleaning up the raw reads. Now we need to fix some alignments.
-
-The first step for this is to realign around indels and snp dense regions.
-
-The Genome Analysis toolkit has a tool for this called IndelRealigner.
-
-It basically runs in 2 steps:
- 
-   1. Find the targets
-   2. Realign them
-	
-
-##GATK IndelRealigner
-
-```{.bash}
-# Realign
-#switch to old GATK 3.8
-module unload  mugqic/GenomeAnalysisTK/4.1.0.0
-module load mugqic/GenomeAnalysisTK/3.8
-
-java -Xmx2G  -jar ${GATK_JAR} \
-  -T RealignerTargetCreator \
-  -R ${REF}/genome/Homo_sapiens.GRCh38.fa \
-  -o alignment/normal/realign.intervals \
-  -I alignment/normal/normal.sorted.bam \
-  -I alignment/tumor/tumor.sorted.bam \
-  -L chr9
-
-java -Xmx2G -jar ${GATK_JAR} \
-  -T IndelRealigner \
-  -R ${REF}/genome/Homo_sapiens.GRCh38.fa \
-  -targetIntervals alignment/normal/realign.intervals \
-  --nWayOut .realigned.bam \
-  -I alignment/normal/normal.sorted.bam \
-  -I alignment/tumor/tumor.sorted.bam
-
-  mv normal.sorted.realigned.ba* alignment/normal/
-  mv tumor.sorted.realigned.ba* alignment/tumor/
-
-
-#return to GATK 4
-module unload mugqic/GenomeAnalysisTK/3.8
-module load  mugqic/GenomeAnalysisTK/4.1.0.0
-  
-```
-**Why did we use both normal and tumor together?** [Solution](solutions/_realign3.md)
-
-**How could we make this go faster ?** [Solution](solutions/_realign1.md)
-
-**How many regions did it think needed cleaning ?** [Solution](solutions/_realign2.md)
-
-Indel Realigner also makes sure the called deletions are left aligned when there is a microsatellite or homopolymer.
-
-```
-This
-ATCGAAAA-TCG
-into
-ATCG-AAAATCG
-
-or
-ATCGATATATATA--TCG
-into
-ATCG--ATATATATATCG
-```
-
-**Why it is important ?**[Solution](solutions/_realign4.md)
-
-
-## Mark duplicates
-**What are duplicate reads ?** [Solution](solutions/_markdup1.md)
-
-**What are they caused by ?** [Solution](solutions/_markdup2.md)
-
-**What are the ways to detect them ?** [Solution](solutions/_markdup3.md)
-
-Here we will use picards approach:
-
-```{.bash}
-# Mark Duplicates
-java -Xmx2G -jar ${GATK_JAR}  MarkDuplicates \
-  --REMOVE_DUPLICATES false --CREATE_INDEX true \
-  -I alignment/normal/normal.sorted.realigned.bam \
-  -O alignment/normal/normal.sorted.dup.bam \
-  --METRICS_FILE alignment/normal/normal.sorted.dup.metrics
-
-java -Xmx2G -jar ${GATK_JAR}  MarkDuplicates \
-  --REMOVE_DUPLICATES false --CREATE_INDEX=true \
-  -I alignment/tumor/tumor.sorted.realigned.bam \
-  -O alignment/tumor/tumor.sorted.dup.bam \
-  --METRICS_FILE alignment/tumor/tumor.sorted.dup.metrics
-
-```
-
-We can look in the metrics output to see what happened.
-
-```{.bash}
-less alignment/normal/normal.sorted.dup.metrics
-
-```
-
-**How many duplicates were there ?** [Solution](solutions/_markdup4.md)
-
-Dupliate reads number are estimated separately for each library.
- 
-**Why is this important to do not combine everything ?** [Solution](solutions/_markdup5.md)
-
-[Note on Duplicate rate](notes/_markdup1.md)
-
-## Base Quality recalibration
-**Why do we need to recalibrate base quality scores ?** [Solution](solutions/_recal1.md)
-
-
-It runs in 2 steps:
-
-    1 - Build covariates based on context and known snp sites
-    2 - Correct the reads based on these metrics
-
-
-GATK BaseRecalibrator:
-
-```{.bash}
-# Recalibrate
-for i in normal tumor
-do
-  java -Xmx2G -jar ${GATK_JAR} BaseRecalibrator \
-    -R ${REF}/genome/Homo_sapiens.GRCh38.fa \
-    --known-sites ${REF}/annotations/Homo_sapiens.GRCh38.dbSNP142.vcf.gz \
-    -L chr9:127452721-127873721 \
-    -O alignment/${i}/${i}.sorted.dup.recalibration_report.grp \
-    -I alignment/${i}/${i}.sorted.dup.bam
-
-    java -Xmx2G -jar ${GATK_JAR} ApplyBQSR \
-      -R ${REF}/genome/Homo_sapiens.GRCh38.fa \
-      -bqsr alignment/${i}/${i}.sorted.dup.recalibration_report.grp \
-      -O alignment/${i}/${i}.sorted.dup.recal.bam \
-      -I alignment/${i}/${i}.sorted.dup.bam
-done
-
-```
-
-
-
-# Extract BAM metrics
-Once your whole bam is generated, it's always a good thing to check the data again to see if everything makes sens.
-
-**Contamination**
-It tells you if your date are contaminated or if a mix-up had occured
-
-**Compute coverage**
-If you have data from a capture kit, you should see how well your targets worked
-
-**Insert Size**
-It tells you if your library worked
-
-**Alignment metrics**
-It tells you if your sample and you reference fit together
-
-## Estimate Normal/tumor contamination
-To estimate these metrics we will use the GATK tool. This run in 2 steps:  
-
-    1 - Generate GATK pileup tables
-    2 - Estimate contamination
-
-
-```{.bash}
-#Pileup table for the tumor sample
-java  -Xmx2G -jar ${GATK_JAR} GetPileupSummaries \
-   -I alignment/tumor/tumor.sorted.dup.recal.bam \
-   -V $REF/annotations/Homo_sapiens.GRCh38.1000G_phase1.snps.high_confidence.vcf.gz \
-   -L chr9:127452721-127873721 \
-   -O alignment/tumor/tumor.pileups.table
-
-#Pileup table for the normal sample 
-java  -Xmx2G -jar ${GATK_JAR} GetPileupSummaries \
-   -I alignment/normal/normal.sorted.dup.recal.bam \
-   -V $REF/annotations/Homo_sapiens.GRCh38.1000G_phase1.snps.high_confidence.vcf.gz \
-   -L chr9:127452721-127873721 \
-   -O alignment/normal/normal.pileups.table
-
-#Esitmate contamination
-java  -Xmx2G -jar ${GATK_JAR} CalculateContamination \
-   -I alignment/tumor/tumor.pileups.table \
-   -matched alignment/normal/normal.pileups.table \
-   -O contamination.table
-
-```
-
-Look at the contamination result file
-
-```{.bash}
-less contamination.table
-
-```
-
-**What do you think about this estimation ?** [solution](solutions/_conta.md)
-
-## Compute coverage
-Both GATK and BVATools have depth of coverage tools. 
-
-Here we'll use the GATK one
-
-```{.bash}
-# Get Depth
-#switch to old GATK 3.8
-module unload  mugqic/GenomeAnalysisTK/4.1.0.0
-module load mugqic/GenomeAnalysisTK/3.8
-
-for i in normal tumor
-do
-  java  -Xmx2G -jar ${GATK_JAR} \
-    -T DepthOfCoverage \
-    --omitDepthOutputAtEachBase \
-    --summaryCoverageThreshold 10 \
-    --summaryCoverageThreshold 25 \
-    --summaryCoverageThreshold 50 \
-    --summaryCoverageThreshold 100 \
-    --start 1 --stop 500 --nBins 499 -dt NONE \
-    -R ${REF}/genome/Homo_sapiens.GRCh38.fa \
-    -o alignment/${i}/${i}.sorted.dup.recal.coverage \
-    -I alignment/${i}/${i}.sorted.dup.recal.bam \
-    -L chr9:127452721-127873721 
-done
-
-#return to GATK 4
-module unload mugqic/GenomeAnalysisTK/3.8
-module load  mugqic/GenomeAnalysisTK/4.1.0.0
-```
-[note on DepthOfCoverage command](notes/_DOC.md)
-
-In this project the expected coverages are : ~40x for the normal and ~50x for the tumor
-
-Look at the coverage:
-
-```{.bash}
-less -S alignment/normal/normal.sorted.dup.recal.coverage.sample_interval_summary
-less -S alignment/tumor/tumor.sorted.dup.recal.coverage.sample_interval_summary
-
-```
-
-**Is the coverage fit with the expectation ?** [solution](solutions/_DOC1.md)
-
-## Insert Size
-It corresponds to the size of DNA fragments sequenced.
-
-Different from the gap size (= distance between reads) !
-
-These metrics are computed using Picard:
-
-```{.bash}
-# Get insert size
-for i in normal tumor
-do
-  java -Xmx2G -jar ${GATK_JAR}  CollectInsertSizeMetrics \
-    -R ${REF}/genome/Homo_sapiens.GRCh38.fa \
-    -I alignment/${i}/${i}.sorted.dup.recal.bam \
-    -O alignment/${i}/${i}.sorted.dup.recal.metric.insertSize.tsv \
-    -H alignment/${i}/${i}.sorted.dup.recal.metric.insertSize.histo.pdf \
-    --METRIC_ACCUMULATION_LEVEL LIBRARY \
-    -L chr9
-done
-
-```
-
-look at the output
-
-```{.bash}
-less -S alignment/normal/normal.sorted.dup.recal.metric.insertSize.tsv
-less -S alignment/tumor/tumor.sorted.dup.recal.metric.insertSize.tsv
-
-```
-
-There is something interesting going on with our libraries.
-
-**Can you tell what it is?** [Solution](solutions/_insert1.md)
-
-**Which library is the most suitable for cancer analysis ?** [Solution](solutions/_insert2.md)
-
-## Alignment metrics
-For the alignment metrics, samtools flagstat is very fast but with bwa-mem since some reads get broken into pieces, the numbers are a bit confusing. 
-
-We prefer the Picard way of computing metrics:
-
-```{.bash}
-# Get alignment metrics
-for i in normal tumor
-do
-  java -Xmx2G -jar ${GATK_JAR}  CollectAlignmentSummaryMetrics \
-    -R ${REF}/genome/Homo_sapiens.GRCh38.fa \
-    -I alignment/${i}/${i}.sorted.dup.recal.bam \
-    -O alignment/${i}/${i}.sorted.dup.recal.metric.alignment.tsv \
-    --METRIC_ACCUMULATION_LEVEL LIBRARY
-done
-
-```
-
-explore the results
-
-```{.bash}
-less -S alignment/normal/normal.sorted.dup.recal.metric.alignment.tsv
-less -S alignment/tumor/tumor.sorted.dup.recal.metric.alignment.tsv
-
-```
-
-**Do you think the sample and the reference genome fit together ?** [Solution](solutions/_alnMetrics1.md)
-
-# Variant calling
-
-![SNV call summary workflow](img/snv_call.png)
-
-Most of SNV caller use either a Baysian, a threshold or a t-test approach to do the calling
-
- Here we will try 3 variant callers.
-- Varscan 2
-- MuTecT2
-- Vardict
-
-
+| Caller | Read-support model | Region-calling logic | Local realignment |
+|---|---|---|---|
+| **VarScan2** | mpileup counts only | Heuristic thresholds + Fisher's exact test | None |
+| **VarDict** | Direct BAM read counts | Heuristic thresholds + statistical test (`testsomatic.R`) | **Yes** — on the fly, soft-clip based |
+| **Mutect2** | Local reassembly (haplotype graph) | Bayesian genotype-likelihood model | Yes — full local assembly |
+| **Strelka2** | Local reassembly | Bayesian mixture model | Yes — full local assembly |
 
 many, MANY others can be found here:
 https://www.biostars.org/p/19104/
+
+We will then apply and ensemble approach to combine the results of the different callers and generate a unified callset.
+
 
 In our case, let's start with:
 
@@ -745,223 +167,716 @@ mkdir -p pairedVariants
 
 ```
 
-## varscan 2
+## Varscan 2
 
-VarScan calls somatic variants (SNPs and indels) using a heuristic method and a statistical test based on the number of aligned reads supporting each allele.
+VarScan2 (Koboldt et al., Genome Research, 2012) takes a fundamentally different approach from the other three callers in this practical. It uses a heuristic method and a statistical test based on the number of aligned reads supporting each allele.
 
+The caller works directly on read counts pulled from samtools mpileup output — it never touches the BAM files itself. This is why, as we set up earlier, region restriction for VarScan2 has to happen at the mpileup step rather than through a flag native to VarScan2.
 
-Varscan somatic caller expects both a normal and a tumor file in SAMtools pileup format. From sequence alignments in binary alignment/map (BAM) format. To build a pileup file, you will need:
-
-- A SAM/BAM file ("myData.bam") that has been sorted using the sort command of SAMtools.
+Requirements for running Samtools mpileup and VarScan2:
+- A Normal/tumor SAM/BAM file that has been coordinate sorted.
 - The reference sequence ("reference.fasta") to which reads were aligned, in FASTA format.
 - The SAMtools software package.
+- The VarScan2 software package (Java-based).
 
 
 ```{.bash}
 # SAMTools mpileup
-for i in normal tumor
-do
-samtools mpileup -B -q 1 \
+##Good practice to purge all modules before loading new ones
+module purge && \
+module load mugqic/samtools/1.14 && \
+samtools mpileup -d 1000 -B -q 10 -Q 10 \
   -f ${REF}/genome/Homo_sapiens.GRCh38.fa \
-  -r chr9:127452721-127873721 \
-  alignment/${i}/${i}.sorted.dup.recal.bam \
-  > pairedVariants/${i}.mpileup
-done
+  -l regions.bed \
+  alignment/HCC1395BL_normal/HCC1395BL_normal.subset.bam \
+  alignment/HCC1395_tumor/HCC1395_tumor.subset.bam \
+  > pairedVariants/HCC1395.varscan2.mpileup
 
 ```
 [note on samtools mpileup command](notes/_mpileup1.md)
 
+The Varscan2 heuristic method refers to a set of user-configurable read-count thresholds applied at every candidate position: 
+- Minimum read depth (--min-coverage, default 8), 
+- Minimum number of reads supporting the variant allele (--min-reads2, default 2), 
+- Minimum variant allele frequency (--min-var-freq, default 0.20 — though for tumor samples this is commonly relaxed to 0.05–0.10 to catch subclonal variants)
+- Minimum base quality (--min-avg-qual, default 15)
 
-Now we can run varscan:
+The "statistical test" is where VarScan2 becomes specifically useful for a tumor-normal pair like HCC1395/HCC1395BL: for every position that passes the heuristic filters, 
+VarScan2's somatic-calling mode (varscan somatic) applies a Fisher's exact test comparing the read counts supporting the reference vs. variant allele in the normal sample 
+against the same counts in the tumor sample. Based on that comparison (and the --somatic-p-value threshold, default 0.05) each variant gets classified into one of four categories:
+
+1. **Germline**: The variant is present in the normal sample but not in the tumor sample.
+2. **Somatic**: The variant is present in the tumor sample but not in the normal sample.
+3. **LOH** (Loss of Heterozygosity): The variant is present in both, but at a higher allele fraction in the tumor
+4. **Unknown**: The variant cannot be classified into any of the above categories.
 
 ```{.bash}
-# varscan
-java -Xmx2G -jar ${VARSCAN2_JAR} somatic \
-   pairedVariants/normal.mpileup \
-   pairedVariants/tumor.mpileup \
-   pairedVariants/varscan2 \
-   --output-vcf 1 \
-   --strand-filter 1 \
-   --somatic-p-value 0.05 
+# Varscan2
+module purge && \
+module load mugqic/java/openjdk-jdk-17.0.1 mugqic/VarScan/2.4.3 mugqic/htslib/1.14 mugqic/bcftools/1.15 && \
+java -Xmx2000M -jar $VARSCAN2_JAR somatic \
+  pairedVariants/HCC1395.varscan2.mpileup \
+  pairedVariants/HCC1395.varscan2 \
+  --min-coverage 3 \
+  --min-var-freq 0.05 \
+  --p-value 0.10 \
+  --somatic-p-value 0.05 \
+  --strand-filter 0 \
+  --output-vcf 1 \
+  --mpileup 1 && \
+bgzip -cf  \
+ pairedVariants/HCC1395.varscan2.snp.vcf \
+  > pairedVariants/HCC1395.varscan2.snp.vcf.gz && \
+tabix -pvcf pairedVariants/HCC1395.varscan2.snp.vcf.gz && \
+bgzip -cf  \
+ pairedVariants/HCC1395.varscan2.indel.vcf \
+  > pairedVariants/HCC1395.varscan2.indel.vcf.gz && \
+tabix -pvcf pairedVariants/HCC1395.varscan2.indel.vcf.gz && \
+bcftools \
+  concat -a \
+  pairedVariants/HCC1395.varscan2.snp.vcf.gz \
+  pairedVariants/HCC1395.varscan2.indel.vcf.gz | \
+sed 's/TUMOR/HCC1395_NS_T_1/g'   | \
+sed 's/NORMAL/HCC1395BL_NS_N_1/g' \
+> pairedVariants/HCC1395.varscan2.vcf && \
+bgzip -cf  \
+ pairedVariants/HCC1395.varscan2.vcf \
+  > pairedVariants/HCC1395.varscan2.vcf.gz && \
+tabix -pvcf pairedVariants/HCC1395.varscan2.vcf.gz
+
+```
+Note: Using bgzip and tabix to compress and index the VCF files is a good practice, especially for large datasets, as it allows for efficient random access to specific regions of the file without needing to decompress the entire file.
+
+**Note on VarScan2 parameters used above** [here](solutions/_varscan1.md)
+
+**From the VarScan2 output, how many germline, LOH, and somatic, variants were called?** [solution](solutions/_varscan2.md)
+
+Open the vcf file and look at the header and the first few lines of the body.
+
+Let's look at the mandatory fields in the VCF file.
+
+```{.bash}
+# View Mandatory fields (-E means to use extended regex)
+zgrep -E "##fileformat|#CHROM" pairedVariants/HCC1395.varscan2.vcf.gz
+```
+
+```
+##fileformat=VCFv4.1
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	HCC1395BL_NS_N_1	HCC1395_NS_T_1
 
 ```
 
-Then we can extract somatic SNPs:
+The FORMAT metadata fields describe the per-sample genotype information. The body of the VCF the FORMAT field is a colon-separated list of subfields, and each sample column contains the corresponding values for those subfields.
 
 ```{.bash}
-# Filtering
-grep "^#\|SS=2" pairedVariants/varscan2.snp.vcf > pairedVariants/varscan2.snp.somatic.vcf
+# View FORMAT fields
+zgrep -E "##FORMAT" pairedVariants/HCC1395.varscan2.vcf.gz
+```
+
+```
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Genotype Quality">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+##FORMAT=<ID=RD,Number=1,Type=Integer,Description="Depth of reference-supporting bases (reads1)">
+##FORMAT=<ID=AD,Number=1,Type=Integer,Description="Depth of variant-supporting bases (reads2)">
+##FORMAT=<ID=FREQ,Number=1,Type=String,Description="Variant allele frequency">
+##FORMAT=<ID=DP4,Number=1,Type=String,Description="Strand read counts: ref/fwd, ref/rev, var/fwd, var/rev">
+```
+
+The INFO metadata fields describe additional information about the variant itself. The body of the VCF the INFO field is a semicolon-separated list of subfields, and each variant line contains the corresponding values for those subfields.
+
+```{.bash}
+# View INFO fields
+zgrep "##INFO" pairedVariants/HCC1395.varscan2.vcf.gz
+```
+
+```
+##INFO=<ID=DP,Number=1,Type=Integer,Description="Total depth of quality bases">
+##INFO=<ID=SOMATIC,Number=0,Type=Flag,Description="Indicates if record is a somatic mutation">
+##INFO=<ID=SS,Number=1,Type=String,Description="Somatic status of variant (0=Reference,1=Germline,2=Somatic,3=LOH, or 5=Unknown)">
+##INFO=<ID=SSC,Number=1,Type=String,Description="Somatic score in Phred scale (0-255) derived from somatic p-value">
+##INFO=<ID=GPV,Number=1,Type=Float,Description="Fisher's Exact Test P-value of tumor+normal versus no variant for Germline calls">
+##INFO=<ID=SPV,Number=1,Type=Float,Description="Fisher's Exact Test P-value of tumor versus normal for Somatic/LOH calls">
 
 ```
 
+Looking at the header how can you differentiate between the germline, LOH, and somatic variants? [solution](solutions/_varscan3.md)
 
-## GATK MuTecT2
+Using the SS field in the VCF file, let's extract all variants using bcftools view variant with the somatic status.
 
 ```{.bash}
-# Variants MuTecT2
-java -Xmx2G -jar ${GATK_JAR} Mutect2 \
-  -R ${REF}/genome/Homo_sapiens.GRCh38.fa \
-  -I alignment/normal/normal.sorted.dup.recal.bam \
-  -I alignment/tumor/tumor.sorted.dup.recal.bam \
-  -normal normal \
-  -tumor tumor \
-  --germline-resource $REF/annotations/Homo_sapiens.GRCh38.1000G_phase1.snps.high_confidence.vcf.gz \
-  -O pairedVariants/mutect2.vcf \
-  -L chr9:127452721-127873721
+# Extract somatic variants
+module purge && \
+module load mugqic/bcftools/1.15 mugqic/htslib/1.14 && \
+bcftools view -Oz -i 'INFO/SS="2"' -o pairedVariants/varscan2.somatic.vcf.gz \
+pairedVariants/HCC1395.varscan2.vcf.gz && tabix -pvcf pairedVariants/varscan2.somatic.vcf.gz
+
+# Sanity check (remove the header and count the number of lines)
+zgrep -v "^#" pairedVariants/varscan2.somatic.vcf.gz | wc -l
+```
+
+This verifies that there are indeed 58 somatic variants, as varscan2 previously identified.
+
+Let's look at the first somatic variant in the vcf file.
+
+```{.bash}
+# View the first somatic variant (-A1 means to show 1 line after the match)
+zgrep -A1 "#CHROM" pairedVariants/HCC1395.varscan2.vcf.gz
 
 ```
 
-Then we can extract somatic SNPs:
+```
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	HCC1395BL_NS_N_1	HCC1395_NS_T_1
+chr13	32315128	.	G	A	.	PASS	DP=191;SOMATIC;SS=2;SSC=50;GPV=1;SPV=9.8238e-06	GT:GQ:DP:RD:AD:FREQ:DP4	0/0:.:65:62:0:0%:29,33,0,0	0/1:.:126:98:26:20.97%:51,47,16,10
+
+```
+
+Notice the normal sample (HCC1395BL_NS_N_1) has a genotype of 0/0 (homozygous reference) with 65 reads (DP) and the tumor sample (HCC1395_NS_T_1) has a genotype of 0/1 (heterozygous variant with 126 reads (DP)).
+
+How would you extract the germline and LOH variants into one vcf file? (Hint: use the OR (|) operator in bcftools view)
+
+<details>
+<summary>How to extract germline and LOH variants</summary>
 
 ```{.bash}
-# Filtering
-java -Xmx2G -jar ${GATK_JAR} FilterMutectCalls \
-   -V pairedVariants/mutect2.vcf \
-   --contamination-table contamination.table \
-   -O pairedVariants/mutect2.filtered.vcf
+# Extract germline and LOH variants
+module purge && \
+module load mugqic/bcftools/1.15 mugqic/htslib/1.14 && \
+bcftools view -Oz -i 'INFO/SS="1" | INFO/SS="3"' -o pairedVariants/HCC1395.varscan2.germline.loh.vcf.gz \
+pairedVariants/HCC1395.varscan2.vcf.gz && tabix -pvcf pairedVariants/HCC1395.varscan2.germline.loh.vcf.gz
 
-vcftools --vcf pairedVariants/mutect2.vcf \
-   --stdout --remove-indels --recode \
-   | sed -e "s|normal|NORMAL|g" -e "s|tumor|TUMOR|g"  \
-   >  pairedVariants/mutect2.snp.somatic.vcf
-  
+##Sanity check (remove the header and count the number of lines)
+zgrep -v "^#" pairedVariants/HCC1395.varscan2.germline.loh.vcf.gz | wc -l 
 ```
+</details>
 
 
 ## Vardict
 
+Vardict (Lai et al., Nucleic Acids Research, 2016) is a versatile variant caller that can handle both germline and somatic variants. 
+Similar to Varscan2, the caller uses user-tuned (e.g. minimum allele frequency (-f), minimum read support, minimum quality) heuristic approach to identify candidate variants and then applies statistical tests to classify them (implemented by testsomatic.R script, conceptually in the same family as VarScan2's Fisher's exact test).
+VarDict performs its own intrinsic local realignment on the fly for more accurate allele frequencies for indels, and also rescues soft clipped reads to identify indels not present in the alignments or as additional support for existing indels. 
+This is similar to the kind of local reassembly step that Mutect2 and Strelka2 performs.
+
 ```{.bash}
-java -Xmx6G -classpath $VARDICT_HOME/lib/VarDict-1.4.9.jar:$VARDICT_HOME/lib/commons-cli-1.2.jar:$VARDICT_HOME/lib/jregex-1.2_01.jar:$VARDICT_HOME/lib/htsjdk-2.8.0.jar com.astrazeneca.vardict.Main \
-  -G ${REF}/genome/Homo_sapiens.GRCh38.fa \
-  -N tumor_pair \
-  -b "alignment/tumor/tumor.sorted.dup.recal.bam|alignment/normal/normal.sorted.dup.recal.bam"  \
-  -Q 10 -f 0.05 -c 1 -S 2 -E 3 -g 4 -th 3 \
-  -R chr9:127452721-127873721 \
-  | $VARDICT_BIN/testsomatic.R \
-  | $VARDICT_BIN/var2vcf_paired.pl -N "TUMOR|NORMAL" -f 0.05 > pairedVariants/vardict.vcf
-  
+module purge && \
+module load mugqic/java/openjdk-jdk1.8.0_72 mugqic/VarDictJava/1.4.8 mugqic/samtools/1.14 mugqic/perl/5.34.0 mugqic/R_Bioconductor/4.1.0_3.13 mugqic/htslib/1.14 && \
+java -Xmx6000M -classpath $VARDICT_HOME/lib/VarDict-1.4.8.jar:$VARDICT_HOME/lib/commons-cli-1.2.jar:$VARDICT_HOME/lib/jregex-1.2_01.jar:$VARDICT_HOME/lib/htsjdk-2.8.0.jar com.astrazeneca.vardict.Main \
+  --G ${REF}/genome/Homo_sapiens.GRCh38.fa \
+  -N HCC1395 \
+  -b "alignment/HCC1395_tumor/HCC1395_tumor.subset.bam|alignment/HCC1395BL_normal/HCC1395BL_normal.subset.bam" \
+  -f 0.03 -Q 10 -c 1 -S 2 -E 3 -g 4 -th 3 \
+  regions.bed | \
+$VARDICT_BIN/testsomatic.R  | \
+perl $VARDICT_BIN/var2vcf_paired.pl \
+    -N "HCC1395_NS_T_1|HCC1395BL_NS_N_1" \
+    -f 0.03 -P 0.9 -m 4.25 -M | \
+bgzip -cf  \
+  > pairedVariants/HCC1395.vardict.vcf.gz && \
+tabix -pvcf pairedVariants/HCC1395.vardict.vcf.gz && \
+zgrep -v "^#" pairedVariants/HCC1395.vardict.vcf.gz | wc -l
 ```
-Note on vardict parameters avaialble [here](notes/_Vardict.md)  
+**Note on vardict parameters available** [here](notes/_vardict.md)  
 
-
-Then we can extract somatic SNPs:
+Then we can extract somatic, germline and LOH variants using bcftools view variant with the INFO/STATUS field:
+Note the use of the regular expression operator (~) to match the string in the INFO/STATUS field i.e for somatic variants we are looking for the string "Somatic" in the INFO/STATUS field so LikelySomatic and StrongSomatic will be matched.
 
 ```{.bash}
-bcftools filter \
-   -i 'FILTER="PASS"&&TYPE="snp"&&INFO/STATUS="StrongSomatic"' \
-   pairedVariants/vardict.vcf \
-   | awk ' BEGIN {OFS="\t"} \
-   { if(substr($0,0,1) == "#" || length($4) == length($5)) {if(substr($0,0,2) != "##") \
-   {t=$10; $10=$11; $11=t} ; print}} ' > pairedVariants/vardict.snp.somatic.vcf
+## Extract somatic variants
+module purge && \
+module load mugqic/bcftools/1.15 mugqic/htslib/1.14 && \
+bcftools \
+  view -f PASS -i 'INFO/STATUS~".*Somatic"' \
+  pairedVariants/HCC1395.vardict.vcf.gz | \
+bgzip -cf  \
+  > pairedVariants/HCC1395.vardict.somatic.vcf.gz && \
+tabix -pvcf pairedVariants/HCC1395.vardict.somatic.vcf.gz && \
+zgrep -v "^#" pairedVariants/HCC1395.vardict.somatic.vcf.gz | wc -l
+
+## Extract germline and LOH variants
+module purge && \
+module load mugqic/bcftools/1.15  mugqic/htslib/1.14 && \
+bcftools \
+  view -f PASS -i 'INFO/STATUS~"Germline" | INFO/STATUS~".*LOH"' \
+  pairedVariants/HCC1395.vardict.vcf.gz | \
+bgzip -cf  \
+  > pairedVariants/HCC1395.vardict.germline.loh.vcf.gz && \
+tabix -pvcf pairedVariants/HCC1395.vardict.germline.loh.vcf.gz && \
+zgrep -v "^#" pairedVariants/HCC1395.vardict.germline.loh.vcf.gz | wc -l
 
 ```
+There are 556 variants in discovered by VarDict, but only 19 somatic variants and 267 germline/LOH variants. Where did the other 270 variants go? [solution](solutions/_vardict1.md)
 
-Now we have somatic variants from all two methods. Let's look at the results. 
+## GATK MuTecT2
+
+Mutect2 (Benjamin et al., part of GATK4) takes yet another approach from the two callers we've already covered. 
+It's the most computationally sophisticated, and unlike VarScan2/VarDict, it doesn't rely on simple allele-count thresholds at all; the calling decision is built entirely on a probabilistic model.
+
+*Active region detection and local assembly*
+
+Rather than evaluating every single position independently, Mutect2 first scans the BAM for "active regions" — windows where the pileup shows enough evidence of possible variation to be worth a closer look, 
+using a quick approximation of its own somatic likelihood model to flag these regions. Within each active region, Mutect2 builds a local assembly graph from the reads and reconstructs candidate haplotypes — this is the similar local-reassembly machinery that gives VarDict its edge over VarScan2 for indels, 
+just implemented via full graph-based assembly rather than VarDict's lighter soft-clip realignment.
+
+*The Bayesian somatic genotyping model* 
+For each candidate haplotype, Mutect2 computes a Tumor LOD (TLOD) score — essentially the log-odds that the site is a real somatic variant rather than reference, based on the tumor reads' support. 
+If you supply a matched normal (as we're doing with HCC1395/HCC1395BL), it also computes a Normal LOD (NLOD), the log-odds that the normal sample's reads are reference rather than showing the same variant — this is what lets Mutect2 actively subtract out anything the normal sample also carries, rather than just noting the overlap the way VarScan2's Fisher's exact test does.
+As a result, Mutect2 can call somatic variants even when the normal sample has a low-level presence of the same variant (e.g., due to contamination or mosaicism), as long as the tumor's support is strong enough to outweigh it.
+
+As a results Mutect2 only calls somatic variants, and does not classify germline or LOH variants.
 
 ```{.bash}
-less pairedVariants/varscan2.snp.somatic.vcf
-less pairedVariants/mutect2.snp.somatic.vcf
-less pairedVariants/vardict.snp.somatic.vcf
+# Variants MuTecT2
+module purge && \
+module load mugqic/java/openjdk-jdk-17.0.1 mugqic/GenomeAnalysisTK/4.6.0.0 && \
+gatk --java-options "-Xmx6000M" \
+  Mutect2 \
+  --pair-hmm-implementation AVX_LOGLESS_CACHING_OMP --native-pair-hmm-threads 3 \
+  --max-reads-per-alignment-start 0 --read-validation-stringency LENIENT \
+  --af-of-alleles-not-in-resource 0.0000025 \
+  --f1r2-tar-gz pairedVariants/HCC1395.f1r2.tar.gz \
+  --reference ${REF}/genome/Homo_sapiens.GRCh38.fa \
+  --input alignment/HCC1395_tumor/HCC1395_tumor.subset.bam \
+  --tumor-sample HCC1395_NS_T_1 \
+  --input alignment/HCC1395BL_normal/HCC1395BL_normal.subset.bam \
+  --normal-sample HCC1395BL_NS_N_1 \
+  --germline-resource Homo_sapiens.GRCh38.af-only-gnomad.regions_only.vcf.gz \
+  --intervals regions.bed \
+  --output pairedVariants/HCC1395.mutect2.vcf.gz
+
+```
+Mutect2 itself is deliberately permissive, it emits a broad candidate callset with annotations, but doesn't do the final PASS/FAIL determination
+That's the job of a second tool, *FilterMutectCalls*, which applies a whole battery of additional filters and probabilistic models e.g
+- Cross-sample contamination model (fed by a separate *CalculateContamination* step)
+- Orientation-bias filtering (important for FFPE samples, less relevant for cell-line data like ours, the *--f1r2-tar-gz* argument above)
+- Hard filter blacklist against any panel of normals (PON; a set of unrelated normal samples run through Mutect2 to flag recurrent technical artifacts)
+
+To filter for somatic SNPs:
+
+```{.bash}
+# Filtering
+module purge && \
+module load mugqic/java/openjdk-jdk-17.0.1 mugqic/GenomeAnalysisTK/4.6.0.0 mugqic/bcftools/1.15 mugqic/htslib/1.14 && \
+gatk --java-options "-Xmx1000M" \
+  LearnReadOrientationModel  \
+  --input pairedVariants/HCC1395.f1r2.tar.gz \
+  --output pairedVariants/HCC1395.read-orientation-model.tar.gz && \
+gatk --java-options "-Xmx1000M" \
+  FilterMutectCalls  \
+  --reference ${REF}/genome/Homo_sapiens.GRCh38.fa \
+  --variant pairedVariants/HCC1395.mutect2.vcf.gz \
+  --ob-priors pairedVariants/HCC1395.read-orientation-model.tar.gz \
+  --output pairedVariants/HCC1395.mutect2.flt.vcf.gz && \
+bcftools view -f PASS -Oz -o pairedVariants/HCC1395.mutect2.somatic.vcf.gz pairedVariants/HCC1395.mutect2.flt.vcf.gz && \
+tabix -pvcf pairedVariants/HCC1395.mutect2.somatic.vcf.gz && \
+zgrep -v "^#" pairedVariants/HCC1395.mutect2.somatic.vcf.gz | wc -l
+```
+Notice that Mutect2 only calls 10 somatic variants
+
+
+## Strelka2
+
+Strelka2 (Kim et al., Nature Methods, 2018) is Illumina's own entry in this comparison, and its design goal was explicitly to solve 
+the runtime and accuracy problems of earlier-generation Bayesian callers — including its own predecessor, the original Strelka — 
+while staying in the same broad "probabilistic model" family as Mutect2 rather than the heuristic family VarScan2/VarDict lean toward.
+
+*A shared four-stage workflow for both germline and somatic modes* 
+Strelka2's somatic and germline analyses (we're using the somatic workflow for HCC1395/HCC1395BL) follow the same high-level pipeline: 
+1. Parameter estimation from the sample data itself
+2. Candidate variant discovery.
+3. Realignment and variant probability inference
+4. Empirical scoring and filtration. 
+
+That first stage — adaptively estimating parameters from your own data rather than using fixed defaults, 
+is a meaningful departure from VarScan2 and VarDict, both of which apply the same fixed heuristic thresholds regardless of what the sequencing data actually looks like.
+
+Let's call somatic variant with Strelka2 on our tumor-normal pair:
+
+```{.bash}
+# Strelka2 somatic (region.bed must be bgzipped and tabix indexed)
+module purge && \
+module load mugqic/htslib/1.14 mugqic/python/2.7.18 mugqic/Strelka2/2.9.10 && \
+cat regions.bed | bgzip -cf > regions.bed.gz && \
+tabix -f -pbed regions.bed.gz && \
+rm -rf pairedVariants/strelka2_somatic && \
+python $STRELKA2_HOME/bin/configureStrelkaSomaticWorkflow.py \
+  --normalBam alignment/HCC1395BL_normal/HCC1395BL_normal.subset.bam \
+  --tumorBam alignment/HCC1395_tumor/HCC1395_tumor.subset.bam \
+  --referenceFasta ${REF}/genome/Homo_sapiens.GRCh38.fa \
+  --callRegions regions.bed.gz \
+  --runDir pairedVariants/strelka2_somatic && \
+python pairedVariants/strelka2_somatic/runWorkflow.py \
+  -m local  \
+  -j 3 \
+  -g 6 \
+  --quiet
 ```
 
-**Could you notice something from these vcf files ?** [Solution](solutions/_vcf1.md)
+```{.bash}
+# Filter for somatic (update_genotypes_strelka.py adds FORMAT GT to samples; strelka2 uses a non-standard format)
+module purge && \
+module load mugqic/bcftools/1.15 mugqic/htslib/1.14 mugqic/mugqic_tools/2.12.7 mugqic/python/3.10.4 && \
+bcftools \
+  concat -a  \
+  pairedVariants/strelka2_somatic/results/variants/somatic.snvs.vcf.gz \
+  pairedVariants/strelka2_somatic/results/variants/somatic.indels.vcf.gz | \
+sed 's/TUMOR/HCC1395_NS_T_1/g'   | \
+sed 's/NORMAL/HCC1395BL_NS_N_1/g'   | \
+bgzip -cf  \
+  > pairedVariants/HCC1395.strelka2.vcf.gz && \
+tabix -pvcf pairedVariants/HCC1395.strelka2.vcf.gz && \
+  python3 $PYTHON_TOOLS/update_genotypes_strelka.py \
+      -i pairedVariants/HCC1395.strelka2.vcf.gz \
+      -o pairedVariants/HCC1395.strelka2.gt.vcf.gz \
+      -n HCC1395BL_NS_N_1 \
+      -t HCC1395_NS_T_1 && \
+bcftools \
+  view -f PASS -Oz \
+ -o pairedVariants/HCC1395.strelka2.somatic.vcf.gz \
+ pairedVariants/HCC1395.strelka2.gt.vcf.gz
+```
 
-
-Details on the spec can be found here:
-http://vcftools.sourceforge.net/specs.html
-
-Fields vary from caller to caller.
- 
-Some values are are almost always there: 
- 
-   - The ref vs alt alleles, 
-   - variant quality (QUAL column)
-   - The per-sample genotype (GT) values.
-
-[note on the vcf format fields](notes/_vcf1.md)
-
-Choosing the best caller is not an easy task each of them have their pros and cons. Now new methods have been developped to extract the best information from a multiple set of variant caller. These methods refer to the ensemble approach (as developped in bcbio.variation or somaticSeq) and rely on pre-selecting a subset of variants from the interesect of multiple caller and then apply Machine Learning approach to filter the high quality variants.
-
-As we don't have enough variant for the full ensemble approach we will just launch the initial step in order to generate a unifed callset form all the call found in at least 2 different variant callers:
+Let's call germline variants with Strelka2:
 
 ```{.bash}
-# Unified callset
-bcbio-variation-recall ensemble \
-  --cores 2 --numpass 2 --names mutect2,varscan2,vardict \
-  pairedVariants/ensemble.snp.somatic.vcf.gz \
+module purge && \
+module load mugqic/htslib/1.14 mugqic/python/2.7.18 mugqic/Strelka2/2.9.10 && \
+rm -r -f pairedVariants/strelka2_germline && \
+python $STRELKA2_HOME/bin/configureStrelkaGermlineWorkflow.py \
+  --bam alignment/HCC1395BL_normal/HCC1395BL_normal.subset.bam \
+  --bam alignment/HCC1395_tumor/HCC1395_tumor.subset.bam \
+  --referenceFasta ${REF}/genome/Homo_sapiens.GRCh38.fa \
+  --callRegions regions.bed.gz \
+  --runDir pairedVariants/strelka2_germline && \
+python pairedVariants/strelka2_germline/runWorkflow.py \
+  -m local  \
+  -j 3 \
+  -g 6 \
+  --quiet
+```
+
+```{.bash}
+# Filter germline
+module purge && \
+module load mugqic/htslib/1.14 mugqic/vt/0.57 mugqic/bcftools/1.15 && \
+zcat pairedVariants/strelka2_germline/results/variants/variants.vcf.gz  | \
+sed 's/TUMOR/HCC1395_NS_T_1/g'   | \
+sed 's/NORMAL/HCC1395BL_NS_N_1/g'   | \
+bgzip -cf  \
+  > pairedVariants/HCC1395.strelka2.germline.vcf.gz && \
+tabix -pvcf pairedVariants/HCC1395.strelka2.germline.vcf.gz && \
+bcftools \
+  view -f PASS -Oz \
+ -o pairedVariants/HCC1395.strelka2.germline.loh.vcf.gz \
+ pairedVariants/HCC1395.strelka2.germline.vcf.gz
+```
+
+We have now generated all somatic and germline/LOH vcf for all four variant callers.  Time to merge them.
+
+## Ensemble approach
+
+Why ensemble approaches?
+
+The core problem: no single caller in your panel has both high sensitivity and high specificity, and their errors typically don't overlap
+VarScan2's heuristic thresholds, VarDict's realignment-plus-heuristic hybrid, and Mutect2/Strelka2's Bayesian assembly-based models each make systematically different mistakes. 
+This is the whole rationale behind consensus calling: benchmarking work comparing caller combinations found that the noise (false positives) returned by any single caller doesn't 
+fully overlap with the noise from a different caller, so accepting only the intersection of multiple callers filters out a meaningful fraction of each caller's individual false positives 
+while retaining true positives that tend to be recovered by more than one method.
+
+However, before we can merge the results, we need to make sure of two things: 
+1. The sample names are consistent across all vcf files (they are which is why sed was used in many of the commands above to rename the sample columns to HCC1395_NS_T_1 and HCC1395BL_NS_N_1)
+2. Standardize variant representation across all vcf files. This is important because different callers may represent the same variant in different ways (e.g., left-aligned vs. right-aligned indels, different representations of multi-allelic sites).
+
+The first issue has already been dealt with.  Standardization will be performed next using vt decompose and vt normalize.  The vt decompose command splits multi-allelic variants into multiple lines, and vt normalize left-aligns indels and ensures consistent representation of variants.
+The later is important, it left-aligns and trims every indel to one canonical position and minimal REF/ALT representation, so the same real-world mutation reported by two callers collapses to an identical VCF record rather than looking like two different variants a few base pairs apart.
+This is also important when annotating variants which is why our variant reporting system CPSR/PCGR checks and runs vt decompose and normalize on the input vcf files before annotation.
+
+Let decompose and normalize the somatic and germline/LOH vcf files:
+
+
+
+```{.bash}
+# Decompose and normalize 4 somatic vcf files (AD field is Number=R in the VCF spec but use Number=., so we need to fix that first)
+for i in pairedVariants/HCC1395.*.somatic.vcf.gz; do \
+OUT=$(echo "$i" | sed 's#somatic#somatic.vt#g') ; \
+echo $i ; \
+module purge && \
+module load mugqic/htslib/1.14 mugqic/vt/0.57 && \
+zcat $i | \
+sed 's/ID=AD,Number=./ID=AD,Number=R/' | \
+vt decompose -s - | \
+vt normalize \
+    -r ${REF}/genome/Homo_sapiens.GRCh38.fa \
+    - | \
+bgzip -cf > ${OUT} && \
+tabix -p vcf ${OUT} ; \
+done
+```
+
+```{.bash}
+# Decompose and normalize 3 germline vcf files 
+for i in pairedVariants/HCC1395.*.germline.loh.vcf.gz; do \
+OUT=$(echo "$i" | sed 's#germline.loh#germline.loh.vt#g') ; \
+echo $i ; \
+module purge && \
+module load mugqic/htslib/1.14 mugqic/vt/0.57 && \
+zcat $i | \
+sed 's/ID=AD,Number=./ID=AD,Number=R/' | \
+vt decompose -s - | \
+vt normalize \
+    -r ${REF}/genome/Homo_sapiens.GRCh38.fa \
+    - | \
+bgzip -cf > ${OUT} && \
+tabix -p vcf ${OUT} ; \
+done
+```
+
+**Were any of the file decomposed and normalized?** [Solution](solutions/_vt1.md)
+
+Let's generate the ensemble call set for somatic
+
+```{.bash}
+# Unified callset (order matters, INFO and FORMAT fields are added in the order of the input files, keep variants found by 2 callers)
+module purge && \
+module load mugqic/bcbio.variation.recall/0.2.6 mugqic/bcftools/1.15 mugqic/java/openjdk-jdk1.8.0_72 && \
+$BCBIO_VARIATION_RECALL_HOME/bcbio.variation.recall ensemble \
+  --cores 2 --numpass 1 \
+  --names mutect2,strelka2,vardict,varscan2 \
+  pairedVariants/HCC1395.ensemble.somatic.vcf.gz \
   ${REF}/genome/Homo_sapiens.GRCh38.fa \
-  pairedVariants/mutect2.snp.somatic.vcf \
-  pairedVariants/varscan2.snp.somatic.vcf \
-  pairedVariants/vardict.snp.somatic.vcf
-
+  pairedVariants/HCC1395.mutect2.somatic.vt.vcf.gz \
+  pairedVariants/HCC1395.strelka2.somatic.vt.vcf.gz \
+  pairedVariants/HCC1395.vardict.somatic.vt.vcf.gz \
+  pairedVariants/HCC1395.varscan2.somatic.vt.vcf.gz && \
+zgrep -v "^#" pairedVariants/HCC1395.ensemble.somatic.vcf.gz | wc -l
 ```
 
-look at the unified callset
+The individual somatic vt vcf contain 10, 7, 19 and 58 (mutect2, strelka2, vardict, varscan2) variants respectively.
+After ensemble process, the unified callset contains a total of 9 variants. 7 variant found by all 4 callers and 2 variant found by 2 callers.
+
+
+Let's generate the ensemble call set for germline/LOH
 
 ```{.bash}
-zless pairedVariants/ensemble.snp.somatic.vcf.gz
-
+# Unified callset (order matters, INFO and FORMAT fields are added in the order of the input files, keep variants found by 2 callers)
+module purge && \
+module load mugqic/bcbio.variation.recall/0.2.6 mugqic/bcftools/1.15 mugqic/java/openjdk-jdk1.8.0_72 && \
+$BCBIO_VARIATION_RECALL_HOME/bcbio.variation.recall ensemble \
+  --cores 2 --numpass 1 \
+  --names strelka2,vardict,varscan2 \
+  pairedVariants/HCC1395.ensemble.germline.vcf.gz \
+  ${REF}/genome/Homo_sapiens.GRCh38.fa \
+  pairedVariants/HCC1395.strelka2.germline.loh.vt.vcf.gz \
+  pairedVariants/HCC1395.vardict.germline.loh.vt.vcf.gz \
+  pairedVariants/HCC1395.varscan2.germline.loh.vt.vcf.gz && \
+zgrep -v "^#" pairedVariants/HCC1395.ensemble.germline.vcf.gz | wc -l
 ```
 
+There are a lot more germlines calls:
+strelka2: 478
+vardict2: 267
+varscan2: 638
 
-# Annotations
-The next step in trying to make sense of the variant calls is to assign functional consequence to each variant.
+There are 672 in the union of the three callers.
 
-At the most basic level, this involves using gene annotations to determine if variants are sense, missense, or nonsense. 
 
-We typically use SnpEff but many use Annovar and VEP as well.
-Let's run snpEff:
+## CPSR/PCGR — turning a VCF into a clinically interpretable report
+
+By this point in the practical, we have an unannotated VCF from four different callers. CPSR and PCGR are the next logical steps: it takes these VCFs and adds
+context to the variants.
+
+*CPSR (Cancer Predisposition Sequencing Reporter)* — interprets germline variants (like our HCC1395 BRCA1 mutation, shared with the matched normal), 
+asking "did this person inherit a cancer-predisposing variant?"
+
+*PCGR (Personal Cancer Genome Reporter)* — interprets somatic variants (the tumor-only mutations, like our HCC1395 TP53 hit), asking "is this a cancer-driving event, is it actionable? Are there treatments?"
+
+Each follow these procedures to annotate and classify variants:
+
+1. Functional annotations using Ensembl's *Variant Effect Predictor (VEP)* with LOFTEE VEP plugin to flags high-confidence loss-of-function variants, 
+   dbNSFP to add pre-computed in silico deleteriousness predictions and cancerhotspots.org to flags positions that are recurrently mutated across thousands of real tumors
+2. Layering on cancer-specific knowledge databases: [CPSR](https://sigven.github.io/cpsr/articles/annotation_resources.html) and [PCGR](https://sigven.github.io/pcgr/articles/annotation_resources.html) use different knowledge databases to annotate variants with clinical relevance. [note on knowledge databases used by CPSR](notes/_knowledge_databases.md)
+3. Applying a standardized classification scheme
+
+To generate the full PCGR report, first CPSR needs to be run on the germline variants, then PCGR can be run on the somatic variants.  The final output is a set of HTML reports that can be viewed in a web browser.
+
+First we have to prepare the germline vcf for CPSR.  
+We will add CPSR/PCGR specific INFO fields to the germline vcf, and then filter for variants using those fields.
+CPSR also requires a single sample vcf, so we will extract the normal sample from the germline vcf.
 
 ```{.bash}
-# SnpEff
-java  -Xmx6G -jar ${SNPEFF_HOME}/snpEff.jar \
-  eff -v -c ${SNPEFF_HOME}/snpEff.config \
-  -o vcf \
-  -i vcf \
-  -stats pairedVariants/ensemble.snp.somatic.snpeff.stats.html \
-  GRCh38.86 \
-  pairedVariants/ensemble.snp.somatic.vcf.gz \
-  > pairedVariants/ensemble.snp.somatic.snpeff.vcf
+# CPSR vcf prep (retain calls from all three caller with tumor and normal depth >=10 and tumor and normal variant allele frequency >=0.05)
+module purge && \
+module load mugqic/mugqic_tools/2.12.7 mugqic/python/3.10.4 mugqic/bcftools/1.15 mugqic/htslib/1.14 && \
+python3 $PYTHON_TOOLS/format2pcgr.py \
+  -i pairedVariants/HCC1395.ensemble.germline.vcf.gz \
+  -o pairedVariants/HCC1395.ensemble.germline.format.vcf.gz \
+  -f 3 \
+  -v germline \
+  -t HCC1395_NS_T_1 && \
+bcftools \
+  view -Oz -i'TDP>=10 && TVAF>=0.05 && NDP>=10 && NVAF>=0.05' \
+  pairedVariants/HCC1395.ensemble.germline.format.vcf.gz | \
+bcftools \
+  view -Oz -s ^HCC1395_NS_T_1 | \
+bcftools \
+  sort -Oz \
+ -o pairedVariants/HCC1395.ensemble.germline.flt.vcf.gz && \
+tabix -pvcf  \
+    pairedVariants/HCC1395.ensemble.germline.flt.vcf.gz
+
 ```
 
-You can learn more about the meaning of snpEff annotations [here](http://snpeff.sourceforge.net/SnpEff_manual.html#output).
+What did the above command add to the germline vcf? [solution](solutions/_cpsr1.md)
 
-Use less to look at the new vcf file: 
+Now we can run CPSR on the germline vcf to generate a report.  As it's running, watch the output log to see what it's doing.  It will take a few minutes to complete.
 
 ```{.bash}
-less -S pairedVariants/ensemble.snp.somatic.snpeff.vcf
+module purge && \
+module load mugqic/pcgr/2.3.1 && \
+mkdir -p pairedVariants/cpsr && \
+cpsr --force_overwrite --secondary_findings --gwas_findings --pgx_findings --panel_id 0 \
+    --input_vcf pairedVariants/HCC1395.ensemble.germline.flt.vcf.gz \
+    --refdata_dir $PCGR_DATA \
+    --vep_dir $PCGR_VEP_CACHE \
+    --output_dir pairedVariants/cpsr \
+    --genome_assembly grch38 \
+    --sample_id HCC1395
+```
+```
+##Noteworthy CPSR logs:
+cpsr-validate-input-arguments - INFO - All sites seem to be decomposed - skipping decomposition of multiallelic sites
+cpsr-validate-input-arguments - INFO - Limiting variant set to cancer predisposition loci (virtual panel id(s): '0')
+cpsr-settings - INFO - Include incidental/secondary findings (ACMG recommended list v3.3): ON
+cpsr-settings - INFO - Include low to moderate cancer risk variants from genome-wide association studies: ON
+cpsr-settings - INFO - Include pharmacogenetic findings (PgX - variants related to potential toxicity to chemotherapy): ON
+cpsr-vcfanno - INFO - (ClinVar, CIViC, dbNSFP, dbMTS, GERP, GWAS catalog, gnomAD non-cancer subset)
+cpsr-gene-annotate - INFO - Number of PASSed variant calls: 245
+cpsr-report-generation - INFO - Variants were found in the following cancer predisposition genes: BRCA1, BRCA2, TP53
 ```
 
-**Can you see the difference with the previous vcf ?** [solution](solutions/_snpeff1.md)
+Feel free to explore the CPSR report in your browser or the other generated file. 
+The report is located in the `pairedVariants/cpsr` directory.
+
+However, we could wait to generate the PCGR report which will also add important germline variant from CPSR report via the yaml file.  This is the next step.
+
+```{.bash}
+# PCGR vcf prep (retain calls from all two caller with tumor and normal depth >=10 and tumor and normal variant allele frequency >=0.05)
+module purge && \
+module load mugqic/mugqic_tools/2.12.7 mugqic/python/3.10.4 mugqic/bcftools/1.15 mugqic/htslib/1.14 && \
+python3 $PYTHON_TOOLS/format2pcgr.py \
+        -i pairedVariants/HCC1395.ensemble.somatic.vcf.gz \
+        -o pairedVariants/HCC1395.ensemble.somatic.format.vcf.gz \
+        -f 2 \
+        -v somatic \
+        -t HCC1395_NS_T_1  && \
+bcftools \
+  view -Oz -i'TDP>=10 && TVAF>=0.05 && NDP>=10 && NVAF<=0.05' \
+  -o pairedVariants/HCC1395.ensemble.somatic.flt.vcf.gz \
+ pairedVariants/HCC1395.ensemble.somatic.format.vcf.gz && \
+tabix -pvcf  \
+  pairedVariants/HCC1395.ensemble.somatic.flt.vcf.gz 
+```
+Note: Coverage and allele frequency filters applied to both tumor and normal samples may need to be adjusted depending on purity or based on contamination estimates.
 
 
-The annotation is presented in the INFO field using the new ANN format. For more information on this field see [here](http://snpeff.sourceforge.net/VCFannotationformat_v1.0.pdf). Typically, we have: 
+```{.bash}
+## PCGR command (-tumor_site 6 is for breast cancer)
+module purge && \
+module load mugqic/pcgr/2.3.1 && \
+mkdir -p pairedVariants/pcgr && \
+pcgr --force_overwrite \
+    --tumor_site 6 \
+    --assay WGS \
+    --call_conf_tag TAL --tumor_dp_tag TDP --tumor_af_tag TVAF --tumor_dp_min 10 --tumor_af_min 0.05 \
+    --control_dp_tag NDP --control_af_tag NVAF --control_dp_min 10 --control_af_max 0.05 \
+    --input_vcf pairedVariants/HCC1395.ensemble.somatic.flt.vcf.gz  \
+    --input_cpsr pairedVariants/cpsr/HCC1395.cpsr.grch38.classification.tsv.gz \
+    --input_cpsr_yaml pairedVariants/cpsr/HCC1395.cpsr.grch38.conf.yaml \
+    --refdata_dir $PCGR_DATA \
+    --vep_dir $PCGR_VEP_CACHE \
+    --output_dir pairedVariants/pcgr \
+    --genome_assembly grch38 \
+    --sample_id HCC1395
+```
+
+PCGR has other functionalities that are out of scope for this practical.  For more information, please refer to the [PCGR documentation](https://sigven.github.io/pcgr/articles/running.html).
+i.e. tumor burden estimation, mutational signature analysis, copy number analysis, RNA expression analysis, and RNA gene fusion interpretation, etc.
 
 
-`ANN=Allele|Annotation|Putative impact|Gene name|Gene ID|Feature type|Feature ID|Transcript biotype|Rank Total|HGVS.c|...`
+# Functional Annotations
+*How does PCGR use VEP to determine functional consequence?*
 
-Here's an example of a typical annotation: 
+PCGR runs VEP as its first annotation step (before layering on all the cancer-database annotations we discussed — COSMIC, CIViC, TSgene, etc.), 
+and the CSQ INFO field is where VEP's raw functional-consequence prediction lives. You can read more about the CSQ format in [VEP's own documentation](https://jun2026.archive.ensembl.org/info/docs/tools/vep/vep_formats.html#vcfout).
 
-`ANN=T|intron_variant|MODIFIER|FAM129B|ENSG00000136830|transcript|ENST00000373312|protein_coding|1/13|c.56-2842T>A|||`
+Look at the annotated ensemble VCF with `less`:
 
-**What does the example annotation actually mean?** [solution](solutions/_snpEff3.md)
+```{.bash}
+less -S pairedVariants/pcgr/HCC1395.pcgr.grch38.pass.vcf.gz
+```
+Can you find the `CSQ=` field in the INFO column?
+
+VEP's consequence `CSQ` field is pipe-delimited. A trimmed version of the format looks like:
+
+```
+CSQ=Allele|Consequence|IMPACT|SYMBOL|Gene|Feature_type|Feature|BIOTYPE|EXON|INTRON|HGVSc|HGVSp|cDNA_position|CDS_position|Protein_position|Amino_acids|Codons|Existing_variation|...
+```
+And critically — one variant gets one CSQ entry per transcript it overlaps, separated by commas. 
+So, a variant that overlaps 15 transcripts will have 15 comma-separated blocks inside a single `CSQ=` tag.
+
+*Worked example: our BRCA2 somatic stop-gain*
+
+Here's the first transcript block from our `13:32339132 G>T` variant (Side note: it's a high confidence variant called by all four callers `CALLERS=mutect2,strelka2,varscan2,vardict` ):
+
+```
+T|stop_gained|HIGH|BRCA2|ENSG00000139618|Transcript|ENST00000380152|protein_coding|11/27||ENST00000380152.8:c.4777G>T|ENSP00000369497.3:p.Glu1593Ter|4976/11954|4777/10257|1593/3418|E/*|Gaa/Taa|COSV66463787|...
+```
+
+What do these CSQ fields means? [solution](solutions/_vep1.md)
+
+How does PCGR report the "most relevant" transcript for each variant?
 
 
-Exercice: 
-**Find a somatic mutation with a predicted High or Moderate impact** [solution](solutions/_snpeff2.md)
+Let's look at the all the overlapping transcripts for our BRCA2 variant:
 
+```{.bash}
+# bcftools (use the VEP plugin to extract the CSQ field)
+ module purge && \
+ module load mugqic/bcftools/1.23 && \
+ bcftools +split-vep -r "13:32339132" \
+ pairedVariants/pcgr/HCC1395.pcgr.grch38.pass.vcf.gz \
+ -f '%CHROM\t%POS\t%REF\t%ALT\t%SYMBOL\t%Feature\t%Consequence\t%HGVSc\t%HGVSp\t%CANONICAL\t%MANE_SELECT\n' \
+ -d \
+ -A tab \
+ 2>/dev/null
+```
+Let's look more closely at the these results [solution](solutions/_vep2.md)
 
-**What effect categories were represented in these variants?** [solution](solutions/_snpEff4.md)
+Now we know that the selection of the "most relevant" transcript is essential for downstream interpretation.
 
+But how does PCGR determine which transcript is the "most relevant" for a given variant? I gave you a hint above [solution](solutions/_vep3.md)
 
+# Beyond VEP: what else does PCGR add to this INFO field
 
+We will not go into the details of all the annotations added by PCGR, but you can find a complete list of all the INFO fields in the [PCGR documentation](https://sigven.github.io/pcgr/articles/annotation_resources.html).
 
-Next, you should view the report generated by snpEff.
+But everything after the CSQ/flattened-VEP block in this record is not from VEP at all — it's PCGR's cancer-database layer, already attached to this exact variant:
 
-Use the procedure described previously to retrieve:
+e.g.
+`TSG;TSG_SUPPORT=NCG&CancerMine:132` — flags BRCA2 as a known tumor suppressor gene
+`BIOMARKER_MATCH=civic|...` — a direct match to CIViC clinical evidence entries
+`ONCOGENICITY=Oncogenic;ONCOGENICITY_CODE=ONCG_OVS1|ONCG_OP4` — PCGR's automated application of the ClinGen/CGC/VICC oncogenicity classification framework: 
+OVS1 ("Oncogenic Very Strong-1") is the code for a null/loss-of-function variant in a gene where loss-of-function is a known mechanism of cancer 
+— exactly what a BRCA2 nonsense mutation is — combined with a supporting-level code (OP4), together pushing this variant to an overall "Oncogenic" call
 
-`snpEff_summary.html`
+Exercise: Find another somatic mutation with a predicted High or Moderate impact, find the CANONICAL transcript and its associated annotations. [solution](solutions/_pcgr1.md)
 
+Feel free to explore the PCGR report in your browser or the other generated file. Before moving to the last section.
+
+Suggested activities:
+- Use the content section (top right) to navigate to the `Variant classification` section. Look at the BRAC2 and TP53 variants. Click on the triangle by the gene name to expand the variant details. Look at the VEP and PCGR annotations. 
+- Navigate to the `Germline findings` section. Look at the BRCA1 variant. Click on the triangle by the gene name to expand the variant details. Look at the VEP and PCGR annotations.
+- Lastly for more information about classification of variants, versioning of databases etc. navigate `documentation section` of the report. Click `database versions` to see the version of each database used in the report. Click on `Report Content` tab to see how variants are classified and other functions.
 
 
 ## Data visualisation
@@ -973,13 +888,16 @@ Before jumping into IGV, we'll generate a track IGV can use to plot coverage:
 
 ```{.bash}
 # Coverage Track
-for i in normal tumor
+module purge
+module load mugqic/igvtools/2.3.14
+
+for bam in alignment/HCC1395*/*subset.bam
 do
-  igvtools count \
-    -f min,max,mean \
-    alignment/${i}/${i}.sorted.dup.recal.bam \
-    alignment/${i}/${i}.sorted.dup.recal.bam.tdf \
-    ${REF}/genome/Homo_sapiens.GRCh38.fa
+    igvtools count \
+        -f min,max,mean \
+        "${bam}" \
+        "${bam}.tdf" \
+        ${REF}/genome/Homo_sapiens.GRCh38.fa
 done
 ```
 
@@ -987,17 +905,15 @@ Then:
  
    1. Open IGV
    2. Chose the reference genome corresponding to those use for alignment (hg38)
-   3. Load bam file
-   4. Load vcf files
+   3. Load bam files (normal and tumor)
+   4. Load vcf files (pairedVariants/HCC1395.ensemble.somatic.flt.vcf.gz)
 
 Explore/play with the data: 
  
-   - find somatic variants
+   - Find somatic variants
    - Look around...
 
 [solution](solutions/_igv1.md)
-
-**Open the high impact position in IGV, what do you see?** [solution](solutions/_snpEff5.md)
 
 # Exit the container environment
 

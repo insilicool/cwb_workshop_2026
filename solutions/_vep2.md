@@ -26,3 +26,6 @@ so this "stop gain" sits on a transcript that's biologically expected to be degr
 - ENST00000713677 (also NMD biotype) → consequence is 3_prime_UTR_variant&NMD_transcript_variant — on this transcript, the same genomic position doesn't even fall in the coding sequence, 
 because the exon/intron structure is different, and gets called something far less severe
 
+So the exact same genomic change (13:32339132 G>T) is simultaneously a HIGH-impact stop-gain on some transcripts and a MODIFIER-impact 3′ UTR variant on another, 
+purely because of how each transcript is structured. This is exactly why transcript choice matters when reporting a variant — reporting "3′ UTR variant" instead of "stop_gained" 
+for the same base change would completely misrepresent the biological impact.

@@ -31,3 +31,4 @@ zgrep "##FILTER" pairedVariants/HCC1395.vardict.vcf.gz
 
 ```
 
+Also it should be noted that selecting by STATUS also removes variants denoted as AFDiff and Deletion, which are not considered somatic variants.  Variants with other STATUS values, such as "AFDiff" or "Deletion", are filtered out and not included in the final set of somatic and germline/LOH variants.
