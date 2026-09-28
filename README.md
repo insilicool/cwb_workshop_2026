@@ -130,8 +130,9 @@ You should have your 1 read group entry.
 
 Tumor-normal (paired): the gold standard because the normal acts as a per-patient control for both germline variation and technical artifacts.
 
-Tumor-only: with no matched normal, callers substitute population databases (gnomAD, dbSNP, ExAC, etc.) and/or a panel of normals (PoN) to guess which variants are likely germline (common in the population) versus somatic
-This is inherently weaker e.g. private/rare germline variants can get miscalled as somatic
+
+Tumor-only: with no matched normal, callers substitute population databases (gnomAD, dbSNP, ExAC, etc.) and/or a panel of normals (PoN) to guess which variants are likely germline (common in the population) versus somatic.
+This is inherently weaker e.g. private/rare germline variants can get miscalled as somatic.
 PON can be useful to filter out recurrent technical artifacts, especially when using the same sequencing platform and library prep (WGS and WES - same baits) as the PoN samples, but it won't help with private germline variants.
 
 Before we start variant discovery, let's look at the structure of the VCF file. 
