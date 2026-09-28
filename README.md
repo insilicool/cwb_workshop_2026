@@ -8,6 +8,7 @@
 This work is licensed under a [Creative Commons Attribution-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-sa/3.0/deed.en_US). This means that you are able to copy, share and modify the work, as long as the result is distributed under the same license.
 
 ================================
+
 Welcome to this introductory tutorial on variant discovery and annotation, where you'll work through the process of identifying and interpreting genomic variants using real cancer sequencing data. 
 
 In this workshop, we will focus only on whole genome data and provide command lines that allow detecting Single Nucleotide Variants (SNV). 
@@ -23,7 +24,7 @@ Both normal and tumor were sequenced on Illumina NovaSeq 6000 using DNA from fre
 
 By the end of this tutorial, you'll have taken processed sequencing data from this well-studied sample through the core steps of a variant discovery workflow — variant calling, and annotation — and interpreted the biological significance of what you find.
 To do this, we will use a subset of the HCC1395/HCC1395BL dataset, focusing on a specific regions of chromosome 13 and 17 that containing 2 somatic (BRCA2 and TP53) and 1 germline (BRCA1).
-Using four variant callers (VarScan2, VarDict, MuTecT2 and Strelka2) we will generate a unified callset of somatic/germlie variants and annotate them using the CPSR/PCGR reporting system.
+Using four variant callers (VarScan2, VarDict, MuTecT2 and Strelka2) we will generate a unified callset of somatic/germline variants and annotate them using the CPSR/PCGR reporting system.
 
 
 **For more details about** [HCC1395](http://www.cng.fr/cagekid/)
@@ -53,18 +54,29 @@ cd $COURSE/SNV
 ```
 
 ### Software requirements
-These are all already installed, but here are the original links.
+The workshop commands use software provided by the MUGQIC module system in the
+`c3genomics/genpipes:v6.2.0` environment. Load the modules needed for each
+step with the `module load` commands in this README; the commands purge and
+load modules as needed rather than requiring every tool to be loaded at once.
 
-  * [BVATools](https://bitbucket.org/mugqic/bvatools/downloads)
-  * [trimmomatic](http://www.usadellab.org/cms/?page=trimmomatic)
-  * [SAMTools](http://sourceforge.net/projects/samtools/)
-  * [IGV](http://www.broadinstitute.org/software/igv/download)
-  * [BWA](http://bio-bwa.sourceforge.net/)
-  * [Genome Analysis Toolkit](http://www.broadinstitute.org/gatk/)
-  * [SnpEff](http://snpeff.sourceforge.net/)
-  * [Varscan2](http://varscan.sourceforge.net/)
-  * [vardict](https://github.com/AstraZeneca-NGS/VarDictJava)
-  * [bcbio variation](https://github.com/chapmanb/bcbio.variation)
+| Software | Version used |
+| --- | --- |
+| [SAMtools](https://www.htslib.org/) | 1.14 |
+| [VarScan2](https://varscan.sourceforge.net/) | 2.4.3 |
+| [VarDictJava](https://github.com/AstraZeneca-NGS/VarDictJava) | 1.4.8 |
+| [GATK (GenomeAnalysisTK)](https://gatk.broadinstitute.org/) | 4.6.0.0 |
+| [Strelka2](https://github.com/Illumina/strelka) | 2.9.10 |
+| [bcftools](https://www.htslib.org/) | 1.15, 1.23 |
+| [HTSlib (bgzip, tabix)](https://www.htslib.org/) | 1.14 |
+| [vt](https://github.com/atks/vt) | 0.57 |
+| [bcbio.variation.recall](https://github.com/chapmanb/bcbio.variation) | 0.2.6 |
+| [PCGR](https://github.com/sigven/pcgr) | 2.3.1 |
+| [IGVtools](https://software.broadinstitute.org/software/igv/igvtools) | 2.3.14 |
+| [OpenJDK](https://openjdk.org/) | 17.0.1, 8u72 |
+| [Perl](https://www.perl.org/) | 5.34.0 |
+| [R / Bioconductor](https://www.bioconductor.org/) | R 4.1.0 / Bioconductor 3.13 |
+| [Python](https://www.python.org/) | 3.10.4, 2.7.18 |
+| [MUGQIC tools](https://github.com/MUGQIC/mugqic_tools) | 2.12.7 |
 
 ## Original Setup
 
