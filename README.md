@@ -27,7 +27,7 @@ To do this, we will use a subset of the HCC1395/HCC1395BL dataset, focusing on a
 Using four variant callers (VarScan2, VarDict, MuTecT2 and Strelka2) we will generate a unified callset of somatic/germline variants and annotate them using the CPSR/PCGR reporting system.
 
 
-**For more details about** [HCC1395](http://www.cng.fr/cagekid/)
+**For more details about** [HCC1395](https://pmc.ncbi.nlm.nih.gov/articles/PMC8532138/)
 
 For practical reasons we subsampled the reads for variants of interests (refseq gene boundaries for BRCA1, BRCA2, and TP53 with 2kb padding) in the table below because running the whole dataset would take way too much time and resources. 
 See data/regions.bed for the exact coordinates of the regions we will be using in this practical.
