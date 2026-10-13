@@ -914,7 +914,7 @@ Suggested activities:
 ## Data visualisation
 The Integrative Genomics Viewer (IGV) is an efficient visualization tool for interactive exploration of large genome datasets. 
 
-![IGV browser presentation](BCRA1_chr17_43057078.png)
+![IGV browser presentation](img/BRCA2_13_32339132.png)
 
 1. Open IGV
 2. Chose the reference genome corresponding to those use for alignment (hg38)
