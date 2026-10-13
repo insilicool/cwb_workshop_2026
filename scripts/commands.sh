@@ -286,7 +286,7 @@ bcftools \
 
 # ===== Block 21/32 =====
 # Decompose and normalize 4 somatic vcf files (AD field is Number=R in the VCF spec but use Number=., so we need to fix that first)
-for i in pairedVariants/HCC1395.*.somatic.vcf.gz; do \
+for i in $(ls pairedVariants/HCC1395.*.somatic.vcf.gz | grep -v ensemble); do \
 OUT=$(echo "$i" | sed 's#somatic#somatic.vt#g') ; \
 echo $i ; \
 module purge && \
