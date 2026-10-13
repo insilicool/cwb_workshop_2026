@@ -343,7 +343,7 @@ bcftools view -Oz -i 'INFO/SS="2"' -o pairedVariants/HCC1395.varscan2.somatic.vc
 pairedVariants/HCC1395.varscan2.vcf.gz && tabix -pvcf pairedVariants/HCC1395.varscan2.somatic.vcf.gz
 
 # Sanity check (remove the header and count the number of lines)
-zgrep -v "^#" pairedVariants/varscan2.somatic.vcf.gz | wc -l
+zgrep -v "^#" pairedVariants/HCC1395.varscan2.somatic.vcf.gz | wc -l
 ```
 
 This verifies that there are indeed 58 somatic variants, as varscan2 previously identified.
@@ -487,7 +487,7 @@ To filter for somatic SNPs:
 ```{.bash}
 # Filtering
 module purge && \
-module load mugqic/java/openjdk-jdk-17.0.1 mugqic/GenomeAnalysisTK/4.6.0.0 mugqic/bcftools/1.15 mugqic/htslib/1.14 && \
+module load mugqic/java/openjdk-jdk-17.0.1 mugqic/GenomeAnalysisTK/4.6.0.0 mugqic/bcftools/1.15 mugqic/htslib/1.14 mugqic/python/3.10.4 && \
 gatk --java-options "-Xmx1000M" \
   LearnReadOrientationModel  \
   --input pairedVariants/HCC1395.f1r2.tar.gz \

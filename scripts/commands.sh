@@ -112,15 +112,15 @@ zgrep "##INFO" pairedVariants/HCC1395.varscan2.vcf.gz
 # Extract somatic variants
 module purge && \
 module load mugqic/bcftools/1.15 mugqic/htslib/1.14 && \
-bcftools view -Oz -i 'INFO/SS="2"' -o pairedVariants/varscan2.somatic.vcf.gz \
-pairedVariants/HCC1395.varscan2.vcf.gz && tabix -pvcf pairedVariants/varscan2.somatic.vcf.gz
+bcftools view -Oz -i 'INFO/SS="2"' -o pairedVariants/HCC1395.varscan2.somatic.vcf.gz \
+pairedVariants/HCC1395.varscan2.vcf.gz && tabix -pvcf pairedVariants/HCC1395.varscan2.somatic.vcf.gz
 
 # Sanity check (remove the header and count the number of lines)
-zgrep -v "^#" pairedVariants/varscan2.somatic.vcf.gz | wc -l
+zgrep -v "^#" pairedVariants/HCC1395.varscan2.somatic.vcf.gz | wc -l
 
 # ===== Block 11/32 =====
 # View the first somatic variant (-A1 means to show 1 line after the match)
-zgrep -A1 "#CHROM" pairedVariants/HCC1395.varscan2.vcf.gz
+zgrep -A1 "#CHROM" pairedVariants/HCC1395.varscan2.somatic.vcf.gz
 
 # ===== Block 12/32 =====
 # Extract germline and LOH variants
@@ -176,7 +176,7 @@ zgrep -v "^#" pairedVariants/HCC1395.vardict.germline.loh.vcf.gz | wc -l
 # ===== Block 15/32 =====
 # Variants MuTecT2
 module purge && \
-module load mugqic/java/openjdk-jdk-17.0.1 mugqic/GenomeAnalysisTK/4.6.0.0 && \
+module load mugqic/java/openjdk-jdk-17.0.1 mugqic/GenomeAnalysisTK/4.6.0.0 mugqic/python/3.10.4 && \
 gatk --java-options "-Xmx6000M" \
   Mutect2 \
   --pair-hmm-implementation AVX_LOGLESS_CACHING_OMP --native-pair-hmm-threads 3 \
@@ -195,7 +195,7 @@ gatk --java-options "-Xmx6000M" \
 # ===== Block 16/32 =====
 # Filtering
 module purge && \
-module load mugqic/java/openjdk-jdk-17.0.1 mugqic/GenomeAnalysisTK/4.6.0.0 mugqic/bcftools/1.15 mugqic/htslib/1.14 && \
+module load mugqic/java/openjdk-jdk-17.0.1 mugqic/GenomeAnalysisTK/4.6.0.0 mugqic/bcftools/1.15 mugqic/htslib/1.14 mugqic/python/3.10.4 && \
 gatk --java-options "-Xmx1000M" \
   LearnReadOrientationModel  \
   --input pairedVariants/HCC1395.f1r2.tar.gz \
@@ -261,6 +261,7 @@ python $STRELKA2_HOME/bin/configureStrelkaGermlineWorkflow.py \
   --bam alignment/HCC1395_tumor/HCC1395_tumor.subset.bam \
   --referenceFasta ${REF}/genome/Homo_sapiens.GRCh38.fa \
   --callRegions regions.bed.gz \
+  --exome \
   --runDir pairedVariants/strelka2_germline && \
 python pairedVariants/strelka2_germline/runWorkflow.py \
   -m local  \
@@ -432,17 +433,17 @@ pcgr --force_overwrite \
 
 # ===== Block 31/32 =====
 # Coverage Track
-module purge
-module load mugqic/igvtools/2.3.14
+#module purge
+#module load mugqic/igvtools/2.3.14
 
-for bam in alignment/HCC1395*/*subset.bam
-do
-    igvtools count \
-        -f min,max,mean \
-        "${bam}" \
-        "${bam}.tdf" \
-        ${REF}/genome/Homo_sapiens.GRCh38.fa
-done
+#for bam in alignment/HCC1395*/*subset.bam
+#do
+#    igvtools count \
+#        -f min,max,mean \
+#        "${bam}" \
+#        "${bam}.tdf" \
+#        ${REF}/genome/Homo_sapiens.GRCh38.fa
+#done
 
 # ===== Block 32/32 =====
 exit
