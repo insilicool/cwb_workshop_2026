@@ -144,7 +144,7 @@ You should have your 1 read group entry.
 
 # Variant Discovery in Cancer
 
-![tumor-normal variant discovery](img/tumor_normal_vs_tumor_only_calling.svg)
+![tumor-normal variant discovery](img/tumor_normal_vs_tumor_only_calling.png)
 
 Tumor-normal (paired): the gold standard because the normal acts as a per-patient control for both germline variation and technical artifacts.
 
@@ -935,6 +935,14 @@ exit
 
 ```
 
-
 ## Acknowledgments
-I would like to thank and acknowledge Louis Letourneau for this help and for sharing his material. The format of the tutorial has been inspired from Mar Gonzalez Porta. I also want to acknowledge Joel Fillon, Louis Letrouneau (again), Robert Eveleigh, Edouard Henrion, Francois Lefebvre, Maxime Caron and Guillaume Bourque for the help in building these pipelines and working with all the various datasets.
+
+I would like to thank all my colleagues for their past and ongoing contributions to the development and preparation of this workshop.
+
+*Past contributors*: Joel Fillon, Louis Letourneau, Edouard Henrion, François Lefebvre, and Maxime Caron.
+
+*Current contributors*: Robert Eveleigh, Alain Pacis, Aline Rangel, Mathieu Bourgey, Hector Galvez, and Guillaume Bourque.
+
+I would also like to acknowledge the SEQC2 Consortium for making publicly available data for the HCC1395 benchmark sample, which supports the practical exercises in this workshop.
+
+The format of the tutorial has been inspired from Mar Gonzalez Porta.
