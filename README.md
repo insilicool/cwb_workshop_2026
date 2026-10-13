@@ -1,6 +1,6 @@
 
 # Introduction to variant discovery and annotations in cancer data
-***By Robert Eveleigh, MSc., Alan Pacis, PhD.***  
+***By Robert Eveleigh, MSc., Alain Pacis, PhD.***  
 *https://github.com/c3g/GenPipes*
 
 ================================
@@ -35,22 +35,39 @@ See data/regions.bed for the exact coordinates of the regions we will be using i
 
 ### Environment setup
 ```{.bash}
-#Spin up docker container
-docker run --privileged -v /tmp:/tmp --network host -it \
-    -w $PWD -v $HOME:$HOME -v /etc/fonts/:/etc/fonts/ \
-    -v $HOME/cvmfs_caches/:/cvmfs-cache/ c3genomics/genpipes:v6.2.0
+# Pull container (once)
+module purge && \
+module load apptainer/1.4.5 && \
+apptainer pull docker://ghcr.io/c3g/genpipes_in_a_container:latest
 
-#Load modules and reference resources    
-module purge
+# Spin up container
+export BIND_LIST=$(realpath $PWD)
+export GENPIPES_SHARED_CVMFS=/tmp/$USER/cvmfs && \
+mkdir -p $GENPIPES_SHARED_CVMFS && \
+apptainer run \
+    --cleanenv \
+    -S /var/run/cvmfs \
+    -B ${GENPIPES_SHARED_CVMFS}:/cvmfs-cache \
+    -B "$BIND_LIST" \
+    --fusemount "container:cvmfs2 cvmfs-config.computecanada.ca /cvmfs/cvmfs-config.computecanada.ca" \
+    --fusemount "container:cvmfs2 soft.mugqic /cvmfs/soft.mugqic" \
+    --fusemount "container:cvmfs2 ref.mugqic /cvmfs/ref.mugqic" \
+    genpipes_in_a_container_latest.sif
 
+# Set up the environment
 export REF=${MUGQIC_INSTALL_HOME}/genomes/species/Homo_sapiens.GRCh38/
-export COURSE=/home/training/cbw_workshop_2026
+export COURSE=/lustre09/project/6007512/pacisala/cbh_workshop_cancer_2026
+#mkdir -p $COURSE/SNV
 
-#create and move to working directory
-mkdir -p $COURSE/SNV
+# Get the workshop data
+git clone https://github.com/insilicool/cwb_workshop_2026.git $COURSE
+ln -s $COURSE/data/alignment alignment
+ln -s $COURSE/data/regions.bed regions.bed
+ln -s cwb_workshop_2026/data/Homo_sapiens.GRCh38.af-only-gnomad.regions_only.vcf.gz* .
 
-cd $COURSE/SNV
-
+# copy cwb_workshop_2026/savedResults as pairedVariants
+tar -xzf cwb_workshop_2026/data/savedResults.tar.gz
+mv savedResults pairedVariants
 ```
 
 ### Software requirements
@@ -107,6 +124,7 @@ You have now processed your data using best practices and should have one BAM fo
 Let's inspect the BAM files to see what is in there.
 
 ```{.bash}
+module load mugqic/samtools/1.14
 ls -l alignment/HCC1395BL_normal/
 samtools view -H alignment/HCC1395BL_normal/HCC1395BL_normal.subset.bam
 
@@ -321,8 +339,8 @@ Using the SS field in the VCF file, let's extract all variants using bcftools vi
 # Extract somatic variants
 module purge && \
 module load mugqic/bcftools/1.15 mugqic/htslib/1.14 && \
-bcftools view -Oz -i 'INFO/SS="2"' -o pairedVariants/varscan2.somatic.vcf.gz \
-pairedVariants/HCC1395.varscan2.vcf.gz && tabix -pvcf pairedVariants/varscan2.somatic.vcf.gz
+bcftools view -Oz -i 'INFO/SS="2"' -o pairedVariants/HCC1395.varscan2.somatic.vcf.gz \
+pairedVariants/HCC1395.varscan2.vcf.gz && tabix -pvcf pairedVariants/HCC1395.varscan2.somatic.vcf.gz
 
 # Sanity check (remove the header and count the number of lines)
 zgrep -v "^#" pairedVariants/varscan2.somatic.vcf.gz | wc -l
@@ -334,7 +352,7 @@ Let's look at the first somatic variant in the vcf file.
 
 ```{.bash}
 # View the first somatic variant (-A1 means to show 1 line after the match)
-zgrep -A1 "#CHROM" pairedVariants/HCC1395.varscan2.vcf.gz
+zgrep -A1 "#CHROM" pairedVariants/HCC1395.varscan2.somatic.vcf.gz
 
 ```
 
@@ -441,7 +459,7 @@ As a results Mutect2 only calls somatic variants, and does not classify germline
 ```{.bash}
 # Variants MuTecT2
 module purge && \
-module load mugqic/java/openjdk-jdk-17.0.1 mugqic/GenomeAnalysisTK/4.6.0.0 && \
+module load mugqic/java/openjdk-jdk-17.0.1 mugqic/GenomeAnalysisTK/4.6.0.0 mugqic/python/3.10.4 && \
 gatk --java-options "-Xmx6000M" \
   Mutect2 \
   --pair-hmm-implementation AVX_LOGLESS_CACHING_OMP --native-pair-hmm-threads 3 \
@@ -560,6 +578,7 @@ python $STRELKA2_HOME/bin/configureStrelkaGermlineWorkflow.py \
   --bam alignment/HCC1395_tumor/HCC1395_tumor.subset.bam \
   --referenceFasta ${REF}/genome/Homo_sapiens.GRCh38.fa \
   --callRegions regions.bed.gz \
+  --exome \
   --runDir pairedVariants/strelka2_germline && \
 python pairedVariants/strelka2_germline/runWorkflow.py \
   -m local  \
@@ -895,31 +914,12 @@ Suggested activities:
 ## Data visualisation
 The Integrative Genomics Viewer (IGV) is an efficient visualization tool for interactive exploration of large genome datasets. 
 
-![IGV browser presentation](img/igv.png)
+![IGV browser presentation](BCRA1_chr17_43057078.png)
 
-Before jumping into IGV, we'll generate a track IGV can use to plot coverage:
-
-```{.bash}
-# Coverage Track
-module purge
-module load mugqic/igvtools/2.3.14
-
-for bam in alignment/HCC1395*/*subset.bam
-do
-    igvtools count \
-        -f min,max,mean \
-        "${bam}" \
-        "${bam}.tdf" \
-        ${REF}/genome/Homo_sapiens.GRCh38.fa
-done
-```
-
-Then:
- 
-   1. Open IGV
-   2. Chose the reference genome corresponding to those use for alignment (hg38)
-   3. Load bam files (normal and tumor)
-   4. Load vcf files (pairedVariants/HCC1395.ensemble.somatic.flt.vcf.gz)
+1. Open IGV
+2. Chose the reference genome corresponding to those use for alignment (hg38)
+3. Load bam files (normal and tumor)
+4. Load vcf files (pairedVariants/HCC1395.ensemble.somatic.flt.vcf.gz)
 
 Explore/play with the data: 
  
