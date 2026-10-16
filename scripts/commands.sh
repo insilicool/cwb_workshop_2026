@@ -42,6 +42,7 @@ set -euo pipefail
 
 # ===== Block 2/32 =====
 ls -l alignment/HCC1395BL_normal/
+module load mugqic/samtools/1.14
 samtools view -H alignment/HCC1395BL_normal/HCC1395BL_normal.subset.bam
 
 # ===== Block 3/32 =====
